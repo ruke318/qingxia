@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="src-tauri/icons/source.svg" alt="轻匣 Logo" width="112" />
+<img src="src-tauri/icons/source.png" alt="轻匣 Logo" width="112" />
 
 # 轻匣 QingBox
 
@@ -189,16 +189,6 @@ qingxia/
 ├── tests/                   # 浏览器回归测试与模拟宿主
 └── docs/                    # 设计文档与接口约定
 ```
-
-## ⭐ Star 趋势
-
-<a href="https://star-history.com/#ruke318/qingxia&Date">
- <picture>
-   <source media="(prefers-color-scheme: dark)" srcset="https://api.star-history.com/svg?repos=ruke318/qingxia&type=Date&theme=dark" />
-   <source media="(prefers-color-scheme: light)" srcset="https://api.star-history.com/svg?repos=ruke318/qingxia&type=Date" />
-   <img alt="Star 趋势" src="https://api.star-history.com/svg?repos=ruke318/qingxia&type=Date" />
- </picture>
-</a>
 
 ## 📄 许可证
 
