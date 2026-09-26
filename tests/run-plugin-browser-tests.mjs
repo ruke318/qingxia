@@ -1,4 +1,4 @@
-// 无人值守运行三个插件及最小示例插件的浏览器回归页：启动 Vite 开发服务，逐页用独立的无界面 Chrome 打开，
+// 无人值守运行各插件及最小示例插件的浏览器回归页：启动 Vite 开发服务，逐页用独立的无界面 Chrome 打开，
 // 读取页面中 <pre id="result"> 的 JSON 结果并汇总；任一页失败时退出码为 1。
 // 只使用临时配置目录启动新的 Chrome 进程，不连接用户正在使用的浏览器。
 import { spawn } from "node:child_process";
@@ -17,6 +17,7 @@ const pages = [
   "plugins/hosts-switch/tests/editor.browser.html",
   "plugins/clipboard-history/tests/history.browser.html",
   "plugins/qr-tools/tests/qr.browser.html",
+  "plugins/crypto-tools/tests/tools.browser.html",
   "tests/minimal-plugin.browser.html",
 ];
 const PAGE_TIMEOUT = 90_000;
@@ -127,7 +128,7 @@ async function main() {
     root,
     configFile: join(root, "vite.config.ts"),
     logLevel: "warn",
-    server: { host: "127.0.0.1", port, strictPort: true, hmr: false },
+    server: { host: "127.0.0.1", port, strictPort: true, hmr: false, cors: true },
   });
   let chrome = null;
   let cdp = null;

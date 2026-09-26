@@ -1,0 +1,36 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>沙箱算法检查</title></head>
+<body>
+<script type="module">
+  // 模拟原生沙箱中没有 WebCrypto 的环境，随机数仍由系统提供。
+  Object.defineProperty(crypto, "subtle", { value: undefined });
+  try {
+    const { utf8Encode, utf8Decode } = await import("../src/lib/bytes.ts");
+    const { hashAll } = await import("../src/lib/hash.ts");
+    const { symmetricCrypt } = await import("../src/lib/symmetric.ts");
+    const { generateRsaKeyPair, rsaEncrypt, rsaDecrypt, generateSm2KeyPair, sm2Encrypt, sm2Decrypt, generateEcdsaKeyPair, ecdsaSign, ecdsaVerify, generateEd25519KeyPair, ed25519Sign, ed25519Verify } = await import("../src/lib/asymmetric.ts");
+    const check = (ok, text) => { if (!ok) throw new Error(text); };
+    const data = utf8Encode("沙箱内离线运算");
+    check(hashAll(utf8Encode("abc"), null, false)[0].value === "900150983cd24fb0d6963f7d28e17f72", "MD5 结果不符");
+    check(hashAll(data, null, false).length === 5, "摘要算法不完整");
+    for (const [algorithm, size, block] of [["aes-128",16,16],["des",8,8],["3des",24,8],["sm4",16,16]]) {
+      const options = { algorithm, mode: "cbc", key: new Uint8Array(size).fill(1), iv: new Uint8Array(block).fill(2) };
+      const cipher = symmetricCrypt({ ...options, encrypt: true, data });
+      check(utf8Decode(symmetricCrypt({ ...options, encrypt: false, data: cipher })) === utf8Decode(data), `${algorithm} 往返失败`);
+    }
+    const rsa = await generateRsaKeyPair(2048);
+    check(utf8Decode(rsaDecrypt(rsa.privateKey, rsaEncrypt(rsa.publicKey, data, "oaep-sha256"), "oaep-sha256")) === utf8Decode(data), "RSA 往返失败");
+    const sm2 = generateSm2KeyPair();
+    check(utf8Decode(sm2Decrypt(sm2.privateKey, sm2Encrypt(sm2.publicKey, data, "c1c3c2", true), "c1c3c2").data) === utf8Decode(data), "SM2 往返失败");
+    const ec = generateEcdsaKeyPair("p256");
+    check(ecdsaVerify("p256", ec.publicKey, data, ecdsaSign("p256", ec.privateKey, data, "der-hex"), "der-hex"), "ECDSA 验签失败");
+    const ed = generateEd25519KeyPair();
+    check(ed25519Verify(ed.publicKey, data, ed25519Sign(ed.privateKey, data, "hex"), "hex"), "Ed25519 验签失败");
+    parent.postMessage({ sandboxCheck: true, ok: true, subtle: typeof crypto.subtle }, "*");
+  } catch (error) {
+    parent.postMessage({ sandboxCheck: true, ok: false, message: String(error) }, "*");
+  }
+</script>
+</body>
+</html>

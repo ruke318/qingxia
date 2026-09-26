@@ -20,10 +20,11 @@ export class HostError extends Error {
  * @param {number} options.width iframe 宽度（像素）
  * @param {number} options.height iframe 高度（像素）
  * @param {Record<string, (params: Record<string, unknown>) => unknown>} options.handlers 按方法名应答请求；返回值即 result，可为 Promise；抛出 HostError 即结构化错误
+ * @param {string} [options.command] 可选：握手 init 中携带的打开命令 ID（清单 `commands[].id`）
  * @returns 模拟宿主：`calls` 按收到顺序记录 `{ method, params }`；`ready` 在握手发出后给出 iframe 的窗口与文档；
  *   `pending` 为尚未应答的请求数；`emit` 主动推送宿主事件
  */
-export function mountPlugin({ src, width, height, handlers }) {
+export function mountPlugin({ src, width, height, handlers, command }) {
   const calls = [];
   const unsupported = [];
   const strayMessages = [];
@@ -70,7 +71,9 @@ export function mountPlugin({ src, width, height, handlers }) {
       const channel = new MessageChannel();
       port = channel.port1;
       port.onmessage = (event) => { void respond(event.data); };
-      win.postMessage({ qingbox: "init", protocol: PROTOCOL_VERSION, theme: "light", locale: "zh-CN" }, location.origin, [channel.port2]);
+      const init = { qingbox: "init", protocol: PROTOCOL_VERSION, theme: "light", locale: "zh-CN" };
+      if (command !== undefined) init.command = command;
+      win.postMessage(init, location.origin, [channel.port2]);
       resolve({ win, doc: frame.contentDocument });
     };
     frame.addEventListener("load", onLoad);

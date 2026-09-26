@@ -1,0 +1,382 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>编码工具插件回归检查</title></head>
+<body style="margin:0">
+  <script type="module">
+    // 本页扮演宿主：iframe 加载插件框架页，经消息协议 v1 应答插件请求并记录调用；init 中带上打开命令 hash
+    import { EditorView } from "@codemirror/view";
+    import { mountPlugin, runScenarios, writeResult } from "../../../tests/plugin-host-mock.js";
+
+    function storageHandlers(store) {
+      return {
+        "storage.get": ({ key }) => store.has(key) ? structuredClone(store.get(key)) : null,
+        "storage.set": ({ key, value }) => { store.set(key, structuredClone(value)); return null; },
+      };
+    }
+    const baseHandlers = { "view.ready": () => null, "view.back": () => null, "view.hide": () => null, "clipboard.readText": () => "来自系统剪贴板", "clipboard.writeText": () => null };
+    const store = new Map();
+    const host = mountPlugin({ src: "./frame.html", width: 720, height: 610, command: "hash", handlers: { ...baseHandlers, ...storageHandlers(store) } });
+    const calls = host.calls;
+    const pause = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+    function assert(condition, message) { if (!condition) throw new Error(message); }
+    async function until(check, message, timeout = 3000) {
+      const deadline = Date.now() + timeout;
+      while (!check()) { if (Date.now() > deadline) throw new Error(message); await pause(10); }
+    }
+
+    let win, doc;
+    // 测试中出现过的私钥，最后检查均未写入 storage
+    const secrets = ["4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb"];
+    const panel = (id) => doc.querySelector(`[data-tab="${id}"]`);
+    const activeTab = () => doc.querySelector('[role="tab"][aria-selected="true"]')?.textContent ?? "";
+    const status = () => doc.querySelector(".status-message")?.textContent ?? "";
+    const inside = (id, selector) => panel(id).querySelector(selector);
+    const field = (id, label) => inside(id, `[aria-label="${label}"]`);
+    function type(element, value) {
+      if (element?.classList.contains("cm-content")) {
+        const view = EditorView.findFromDOM(element);
+        view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value }, selection: { anchor: value.length }, userEvent: "input.type" });
+        return;
+      }
+      assert(element && ["TEXTAREA", "INPUT"].includes(element.tagName), `找不到输入框：${element?.outerHTML.slice(0, 80)}`);
+      const proto = element.tagName === "TEXTAREA" ? win.HTMLTextAreaElement.prototype : win.HTMLInputElement.prototype;
+      Object.getOwnPropertyDescriptor(proto, "value").set.call(element, value);
+      element.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText" }));
+    }
+    function editorValue(element) {
+      if (!element) return undefined;
+      return element.classList.contains("cm-content") ? EditorView.findFromDOM(element).state.doc.toString() : element.value;
+    }
+    function choose(select, value) {
+      Object.getOwnPropertyDescriptor(win.HTMLSelectElement.prototype, "value").set.call(select, value);
+      select.dispatchEvent(new win.Event("change", { bubbles: true }));
+    }
+    // 切换选项后界面异步重新渲染，先等目标控件出现再操作
+    async function typeInto(id, label, value) { await until(() => field(id, label), `找不到“${label}”输入框`); type(field(id, label), value); }
+    async function chooseIn(id, label, value) { await until(() => field(id, label), `找不到“${label}”选择框`); choose(field(id, label), value); }
+    const radio = (id, group, label) => [...field(id, group).querySelectorAll('[role="radio"]')].find((item) => item.textContent === label);
+    const button = (id, text) => [...panel(id).querySelectorAll("button")].find((item) => item.textContent.includes(text));
+    // 执行按钮与“操作”分段按钮同名，按样式类区分
+    const run = (text) => { const target = inside("asymmetric", ".primary-button"); assert(target.textContent === text, `执行按钮应为“${text}”`); target.click(); };
+    const row = (id, label) => inside(id, `[aria-label="复制 ${label}"]`);
+    const rowValue = (id, label) => id === "symmetric" ? editorValue(field(id, "加解密结果")) : row(id, label)?.querySelector(".result-value")?.textContent ?? "";
+    const key = (init) => {
+      const event = new win.KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init });
+      (doc.activeElement ?? doc.body).dispatchEvent(event);
+      return event;
+    };
+    const copies = () => calls.filter((call) => call.method === "clipboard.writeText").map((call) => call.params.text);
+    async function clickCopy(id, label) {
+      const before = copies().length;
+      row(id, label).click();
+      await until(() => copies().length > before, `点击 ${label} 未调用 clipboard.writeText`);
+      return copies().at(-1);
+    }
+
+    async function setup() {
+      ({ win, doc } = await host.ready);
+      await until(() => doc.querySelector(".tab-bar") && panel("hash") && calls.some((call) => call.method === "view.ready"), "插件未就绪");
+    }
+
+    const scenarios = [
+      ["握手带 command=hash 时直接打开“哈希”分页，view.shown 聚焦输入框", async () => {
+        assert(activeTab().startsWith("哈希"), `初始分页不正确：${activeTab()}`);
+        assert(!panel("hash").hidden && panel("encode").hidden, "分页显示状态不正确");
+        const ready = calls.findIndex((call) => call.method === "view.ready");
+        assert(calls.slice(0, ready).some((call) => call.method === "storage.get" && call.params.key === "draft.hash"), "应先读取草稿再通知就绪");
+        host.emit("view.shown");
+        await until(() => doc.activeElement === field("hash", "输入"), "view.shown 后未聚焦哈希输入框");
+      }],
+      ["哈希：MD5、SHA、SM3 同时列出，大小写切换，填写密钥改为 HMAC（RFC 4231 用例 2）", async () => {
+        await typeInto("hash", "输入", "abc");
+        await until(() => rowValue("hash", "MD5") === "900150983cd24fb0d6963f7d28e17f72", "MD5 结果不正确");
+        assert(rowValue("hash", "SM3") === "66c7f0f462eeedd9d1f2d46bdc10e4e24167c4875cf2f7a2297da02b8f4ba8e0", "SM3 结果不正确");
+        assert(rowValue("hash", "SHA-1") === "a9993e364706816aba3e25717850c26c9cd0d89d", "SHA-1 结果不正确");
+        radio("hash", "输出大小写", "大写").click();
+        await until(() => rowValue("hash", "MD5") === "900150983CD24FB0D6963F7D28E17F72", "大写输出未生效");
+        radio("hash", "输出大小写", "小写").click();
+        await typeInto("hash", "输入", "what do ya want for nothing?");
+        await typeInto("hash", "HMAC 密钥", "Jefe");
+        await until(() => rowValue("hash", "HMAC-SHA-256") === "5bdcc146bf60754e6a042426089575c75a003f089d2739839dec58b964ec3843", "HMAC-SHA-256 结果不正确");
+        await chooseIn("hash", "输入格式", "hex");
+        await until(() => inside("hash", ".result-error")?.textContent.includes("Hex"), "Hex 输入格式错误未提示");
+        await chooseIn("hash", "输入格式", "text");
+      }],
+      ["点击结果行调用 clipboard.writeText，参数为完整结果，状态栏提示已复制", async () => {
+        await until(() => row("hash", "HMAC-SHA-512"), "缺少 HMAC-SHA-512 结果行");
+        const text = await clickCopy("hash", "HMAC-SHA-512");
+        assert(text === "164b7a7bfcf819e2e395fbe73b56e0a387bd64222e831fd610270cd7ea2505549758bf75c05a994a6d034f65f8f0e6fdcaeab1a34d4a6b4b636e070a38bce737", "复制内容不正确");
+        await until(() => status().includes("已复制 HMAC-SHA-512"), "状态栏没有复制反馈");
+      }],
+      ["编码：格式选择、中文往返、错误反馈与结果复制", async () => {
+        key({ key: "1", code: "Digit1", metaKey: true });
+        await until(() => activeTab().startsWith("编码"), "⌘1 未切换到编码分页");
+        await until(() => store.get("lastTab") === "encode", "停留分页未写入 storage");
+        await until(() => doc.activeElement === field("encode", "原文"), "切换后未聚焦输入框");
+        await typeInto("encode", "原文", "中文 a+b/?");
+        const output = () => editorValue(field("encode", "编码结果"));
+        await until(() => output() === "5Lit5paHIGErYi8/", "Base64 编码不正确");
+        await chooseIn("encode", "结果格式", "base64url");
+        await until(() => output() === "5Lit5paHIGErYi8_", "URL 安全 Base64 不正确");
+        await chooseIn("encode", "结果格式", "component");
+        await until(() => output() === "%E4%B8%AD%E6%96%87%20a%2Bb%2F%3F", "URI 编码不正确");
+        await chooseIn("encode", "结果格式", "hex");
+        await until(() => output() === "e4b8ade6968720612b622f3f", "Hex 编码不正确");
+        const before = copies().length;
+        button("encode", "复制结果").click();
+        await until(() => copies().length > before, "未调用复制接口");
+        assert(copies().at(-1) === output(), "复制内容不是完整输出");
+        radio("encode", "编码或解码", "解码").click();
+        await chooseIn("encode", "结果格式", "base64");
+        await typeInto("encode", "待解码内容", "5Lit5paH");
+        await until(() => output() === "中文", "Base64 解码不正确");
+        await chooseIn("encode", "结果格式", "hex");
+        await until(() => inside("encode", ".editor-error")?.textContent.includes("Hex"), "无效编码未显示原因");
+        assert(button("encode", "复制结果").disabled, "无效结果不应允许复制");
+      }],
+      ["编码：粘贴、清空与撤销重做，编辑快捷键不会退出插件", async () => {
+        radio("encode", "编码或解码", "编码").click();
+        await until(() => field("encode", "原文"), "未切回编码模式");
+        button("encode", "清空").click();
+        await until(() => editorValue(field("encode", "原文")) === "", "清空按钮未清除输入");
+        button("encode", "粘贴").click();
+        await until(() => editorValue(field("encode", "原文")) === "来自系统剪贴板", "粘贴按钮未读取文本剪贴板");
+        const content = field("encode", "原文");
+        content.focus();
+        key({ key: "z", code: "KeyZ", keyCode: 90, metaKey: true });
+        await until(() => editorValue(content) !== "来自系统剪贴板", "粘贴后无法撤销");
+        await pause();
+        key({ key: "Z", code: "KeyZ", keyCode: 90, metaKey: true, shiftKey: true });
+        await until(() => editorValue(content) === "来自系统剪贴板", "撤销后无法重做");
+        for (const code of ["a", "c", "x", "v"]) key({ key: code, code: `Key${code.toUpperCase()}`, metaKey: true });
+        assert(!calls.some((call) => call.method === "view.back" || call.method === "view.hide"), "编辑快捷键退出了插件");
+      }],
+      ["⌘3 对称加密：AES-128-CBC 与 NIST SP 800-38A 一致，长度错误有中文提示，解密往返", async () => {
+        key({ key: "3", code: "Digit3", metaKey: true });
+        await until(() => activeTab().startsWith("对称加密"), "⌘3 未切换到对称加密");
+        await chooseIn("symmetric", "密钥格式", "hex");
+        await chooseIn("symmetric", "IV 格式", "hex");
+        await chooseIn("symmetric", "输入格式", "hex");
+        await chooseIn("symmetric", "输出格式", "hex");
+        await typeInto("symmetric", "密钥", "2b7e151628aed2a6abf7158809cf4f3c");
+        await typeInto("symmetric", "IV", "000102030405060708090a0b0c0d0e0f");
+        await typeInto("symmetric", "明文", "6bc1bee22e409f96e93d7e117393172a");
+        await until(() => rowValue("symmetric", "AES-128-CBC").startsWith("7649abac8119b246cee98e9b12e9197d"), "AES-128-CBC 密文不正确");
+        const cipher = rowValue("symmetric", "AES-128-CBC");
+        await chooseIn("symmetric", "算法", "aes-256");
+        await until(() => inside("symmetric", ".editor-error")?.textContent === "AES-256 的密钥需要 32 字节，当前为 16 字节", "密钥长度错误提示不正确");
+        await chooseIn("symmetric", "算法", "aes-128");
+        radio("symmetric", "加密或解密", "解密").click();
+        await chooseIn("symmetric", "输入格式", "hex");
+        await chooseIn("symmetric", "输出格式", "hex");
+        await typeInto("symmetric", "密文", cipher);
+        await until(() => rowValue("symmetric", "AES-128-CBC") === "6bc1bee22e409f96e93d7e117393172a", "解密未还原明文");
+        await chooseIn("symmetric", "模式", "ecb");
+        assert(!field("symmetric", "IV"), "ECB 模式不应显示 IV");
+      }],
+      ["对称填充可选择并保存，NoPadding 检查长度，GCM 固定无需填充", async () => {
+        radio("symmetric", "加密或解密", "加密").click();
+        await chooseIn("symmetric", "模式", "cbc");
+        await chooseIn("symmetric", "填充", "none");
+        await typeInto("symmetric", "明文", "6bc1bee22e409f96e93d7e117393172a");
+        await until(() => rowValue("symmetric") === "7649abac8119b246cee98e9b12e9197d", "NoPadding 不应追加一个填充分组");
+        await typeInto("symmetric", "明文", "61");
+        await until(() => inside("symmetric", ".editor-error")?.textContent.includes("NoPadding"), "未对不完整分组提示错误");
+        await chooseIn("symmetric", "填充", "zero");
+        await until(() => rowValue("symmetric")?.length === 32, "ZeroPadding 应将短明文补足一个分组");
+        await until(() => store.get("draft.symmetric")?.padding === "zero", "填充选项未保存到草稿");
+        await chooseIn("symmetric", "模式", "gcm");
+        await until(() => !field("symmetric", "填充"), "GCM 不应允许选择填充");
+        assert(panel("symmetric").textContent.includes("NoPadding"), "GCM 应明确无需填充");
+        await chooseIn("symmetric", "模式", "cbc");
+        await until(() => field("symmetric", "填充")?.value === "zero", "切回 CBC 应保留填充选项");
+        assert(doc.documentElement.scrollHeight <= 610, "新增填充选项不能溢出面板");
+      }],
+      ["对称加密提供 PKCS5，并按算法兼容处理", async () => {
+        await chooseIn("symmetric", "模式", "cbc");
+        await chooseIn("symmetric", "填充", "pkcs5");
+        await until(() => field("symmetric", "填充")?.value === "pkcs5", "缺少 PKCS5 填充选项");
+        await chooseIn("symmetric", "算法", "des");
+        await chooseIn("symmetric", "密钥格式", "hex");
+        await chooseIn("symmetric", "IV 格式", "hex");
+        await chooseIn("symmetric", "输入格式", "text");
+        await chooseIn("symmetric", "输出格式", "hex");
+        await typeInto("symmetric", "密钥", "133457799bbcdff1");
+        await typeInto("symmetric", "IV", "1234567890abcdef");
+        await typeInto("symmetric", "明文", "123456789");
+        await until(() => rowValue("symmetric").length === 32, "DES PKCS5 应补到 8 字节分组");
+        await chooseIn("symmetric", "算法", "aes-128");
+        await until(() => field("symmetric", "填充")?.value === "pkcs5", "切换 AES 后 PKCS5 选项应保留");
+        await typeInto("symmetric", "密钥", "2b7e151628aed2a6abf7158809cf4f3c");
+        await typeInto("symmetric", "IV", "000102030405060708090a0b0c0d0e0f");
+        await until(() => rowValue("symmetric").length === 32, "AES PKCS5 应按 16 字节分组计算");
+        const pkcs5 = rowValue("symmetric");
+        await chooseIn("symmetric", "填充", "pkcs7");
+        await until(() => field("symmetric", "填充")?.value === "pkcs7", "未切换到 PKCS7");
+        assert(rowValue("symmetric") === pkcs5, "AES 的两种命名应产生相同结果");
+        await chooseIn("symmetric", "填充", "pkcs5");
+        await until(() => store.get("draft.symmetric")?.padding === "pkcs5", "PKCS5 选择应保存到草稿");
+      }],
+      ["⌘4 非对称：Ed25519 按 RFC 8032 测试 2 签名、验签，篡改后验签失败", async () => {
+        key({ key: "4", code: "Digit4", metaKey: true });
+        await until(() => activeTab().startsWith("非对称加密"), "⌘4 未切换到非对称加密");
+        radio("asymmetric", "算法", "Ed25519").click();
+        await until(() => radio("asymmetric", "操作", "签名"), "Ed25519 缺少签名操作");
+        assert(!radio("asymmetric", "操作", "加密"), "Ed25519 不应提供加密");
+        await chooseIn("asymmetric", "消息格式", "hex");
+        await typeInto("asymmetric", "私钥", "4ccd089b28ff96da9db6c346ec114e0f5b8a319f35aba624da8cf6ed4fb8a6fb");
+        await typeInto("asymmetric", "公钥", "3d4017c3e843895a92b70aa74d1b7ebc9c982ccf2ec4968cc0cd55f12af4660c");
+        await typeInto("asymmetric", "消息", "72");
+        run("签名");
+        const expected = "92a009a9f0d4cab8720e820b5f642540a2b27b5416503f8fb3762223ebdb69da085ac1e43e15996e458f3613d0f11d8c387b2eaeb4302aeeb00d291612bb0c00";
+        await until(() => rowValue("asymmetric", "签名") === expected, "Ed25519 签名与 RFC 8032 不一致");
+        assert(await clickCopy("asymmetric", "签名") === expected, "复制的签名不正确");
+        radio("asymmetric", "操作", "验签").click();
+        await until(() => field("asymmetric", "签名"), "验签时缺少签名输入框");
+        await typeInto("asymmetric", "签名", expected);
+        // ⌘↩ 执行；输入法组合输入期间不触发
+        field("asymmetric", "签名").focus();
+        key({ key: "Enter", metaKey: true, isComposing: true });
+        await pause();
+        assert(!inside("asymmetric", ".verify-result"), "组合输入期间不应执行");
+        key({ key: "Enter", metaKey: true });
+        await until(() => inside("asymmetric", ".verify-result.valid"), "验签应通过");
+        await typeInto("asymmetric", "消息", "73");
+        run("验签");
+        await until(() => inside("asymmetric", ".verify-result:not(.valid)"), "篡改消息后验签应失败");
+      }],
+      ["SM2：生成密钥对，加密后按 C1C3C2 解密还原；签名、验签通过", async () => {
+        radio("asymmetric", "算法", "SM2").click();
+        await until(() => radio("asymmetric", "算法", "SM2").getAttribute("aria-checked") === "true", "未切换到 SM2");
+        await chooseIn("asymmetric", "消息格式", "text");
+        button("asymmetric", "生成密钥对").click();
+        await until(() => /^04[0-9a-f]{128}$/.test(field("asymmetric", "公钥").value) && /^[0-9a-f]{64}$/.test(field("asymmetric", "私钥").value), "SM2 密钥对未生成");
+        secrets.push(field("asymmetric", "私钥").value);
+        radio("asymmetric", "操作", "加密").click();
+        await typeInto("asymmetric", "明文", "国密 SM2 测试");
+        run("加密");
+        await until(() => /^04[0-9a-f]+$/.test(rowValue("asymmetric", "密文")), "SM2 加密失败");
+        const cipher = rowValue("asymmetric", "密文");
+        radio("asymmetric", "操作", "解密").click();
+        await typeInto("asymmetric", "密文", cipher.slice(2));
+        run("解密");
+        await until(() => rowValue("asymmetric", "明文") === "国密 SM2 测试", "不带 04 的 SM2 密文未能解密");
+        radio("asymmetric", "操作", "签名").click();
+        await typeInto("asymmetric", "消息", "待签名消息");
+        run("签名");
+        await until(() => /^[0-9a-f]{128}$/.test(rowValue("asymmetric", "签名")), "SM2 原始签名格式不正确");
+        const signature = rowValue("asymmetric", "签名");
+        radio("asymmetric", "操作", "验签").click();
+        await typeInto("asymmetric", "签名", signature);
+        run("验签");
+        await until(() => inside("asymmetric", ".verify-result.valid"), "SM2 验签应通过");
+        await typeInto("asymmetric", "用户 ID", "other-id");
+        run("验签");
+        await until(() => inside("asymmetric", ".verify-result:not(.valid)"), "更换用户 ID 后验签应失败");
+      }],
+      ["RSA 2048：生成期间显示“生成中”且界面不卡顿，生成后加解密往返", async () => {
+        radio("asymmetric", "算法", "RSA").click();
+        await until(() => field("asymmetric", "密钥长度"), "未切换到 RSA");
+        let last = performance.now(), maxGap = 0;
+        const timer = setInterval(() => { const now = performance.now(); maxGap = Math.max(maxGap, now - last); last = now; }, 10);
+        const start = performance.now();
+        button("asymmetric", "生成密钥对").click();
+        await until(() => button("asymmetric", "生成中…")?.disabled, "生成期间按钮未显示“生成中”");
+        await until(() => field("asymmetric", "私钥").value.startsWith("-----BEGIN PRIVATE KEY-----"), "RSA 密钥对未生成", 60000);
+        clearInterval(timer);
+        assert(field("asymmetric", "公钥").value.startsWith("-----BEGIN PUBLIC KEY-----"), "RSA 公钥不是 SPKI PEM");
+        secrets.push(field("asymmetric", "私钥").value.split("\n")[1]);
+        assert(maxGap < 250, `生成期间主线程最长阻塞 ${Math.round(maxGap)} 毫秒`);
+        window.__rsaGeneration = Math.round(performance.now() - start);
+        radio("asymmetric", "操作", "加密").click();
+        await chooseIn("asymmetric", "填充", "oaep-sha256");
+        await typeInto("asymmetric", "明文", "RSA 往返");
+        run("加密");
+        await until(() => rowValue("asymmetric", "密文").length === 344, "RSA 密文应为 256 字节的 Base64");
+        const cipher = rowValue("asymmetric", "密文");
+        radio("asymmetric", "操作", "解密").click();
+        await typeInto("asymmetric", "密文", cipher);
+        run("解密");
+        await until(() => rowValue("asymmetric", "明文") === "RSA 往返", "RSA 解密未还原明文");
+      }],
+      ["私钥不写入 storage，公钥与其他输入保存为草稿", async () => {
+        const marker = "PRIVATE-KEY-MUST-NOT-BE-SAVED";
+        await typeInto("asymmetric", "私钥", marker);
+        await typeInto("asymmetric", "公钥", "PUBLIC-KEY-DRAFT");
+        await until(() => store.get("draft.asymmetric")?.publicKeys?.rsa === "PUBLIC-KEY-DRAFT", "公钥未保存为草稿", 3000);
+        await pause(500);
+        secrets.push(marker);
+        const sets = calls.filter((call) => call.method === "storage.set").map((call) => JSON.stringify(call.params));
+        assert(sets.length > 0, "应有草稿写入");
+        for (const secret of secrets) assert(!sets.some((text) => text.includes(secret)), `私钥内容被写入了 storage：${secret.slice(0, 12)}…`);
+        assert(!sets.some((text) => text.includes("PRIVATE KEY")), "PEM 私钥被写入了 storage");
+        assert(store.get("draft.symmetric")?.key === "2b7e151628aed2a6abf7158809cf4f3c", "对称密钥等其余输入应保存为草稿");
+      }],
+      ["Esc 返回搜索；输入法组合输入期间的 Esc 不返回", async () => {
+        field("asymmetric", "消息")?.focus();
+        const count = () => calls.filter((call) => call.method === "view.back").length;
+        key({ key: "Escape", isComposing: true });
+        await pause();
+        assert(count() === 0, "组合输入期间的 Esc 不应返回");
+        key({ key: "Escape", keyCode: 229 });
+        await pause();
+        assert(count() === 0, "keyCode 229 的 Esc 不应返回");
+        key({ key: "Escape" });
+        await until(() => count() === 1, "Esc 未调用 view.back");
+      }],
+      ["未带 command 打开时，恢复上次停留的分页与草稿", async () => {
+        const second = mountPlugin({ src: "./frame.html", width: 720, height: 610, handlers: { ...baseHandlers, ...storageHandlers(new Map([["lastTab", "symmetric"], ["draft.encode", { input: "草稿内容", mode: "encode" }]])) } });
+        const { doc: other } = await second.ready;
+        await until(() => second.calls.some((call) => call.method === "view.ready"), "第二个实例未就绪");
+        const selected = other.querySelector('[role="tab"][aria-selected="true"]').textContent;
+        assert(selected.startsWith("对称加密"), `未恢复上次分页：${selected}`);
+        assert(editorValue(other.querySelector('[data-tab="encode"] [aria-label="原文"]')) === "草稿内容", "未恢复编码草稿");
+        assert(!second.unsupported.length && !second.strayMessages.length, "第二个实例违反协议约束");
+        second.frame.remove();
+      }],
+      ["内容区固定 720×610，内部滚动不撑开页面", async () => {
+        assert(doc.documentElement.scrollHeight <= 610 && doc.documentElement.scrollWidth <= 720, "页面被内容撑开");
+        const panels = doc.querySelector(".panels");
+        const bar = doc.querySelector(".tab-bar");
+        assert(bar.scrollWidth <= bar.clientWidth, "顶部分页在 720 宽度下溢出");
+        // 各分页在最小宽度下都不出现横向溢出
+        for (const [index, id] of ["encode", "hash", "symmetric", "asymmetric"].entries()) {
+          key({ key: String(index + 1), code: `Digit${index + 1}`, metaKey: true });
+          await until(() => !panel(id).hidden, `未切换到 ${id}`);
+          assert(panel(id).querySelector(".tool-bar").getBoundingClientRect().bottom <= 610, "底部工具栏超出可视区域");
+          assert(panels.scrollWidth <= panels.clientWidth, `${id} 分页横向溢出：${panels.scrollWidth} > ${panels.clientWidth}`);
+          const overflow = [...panel(id).querySelectorAll("*")].find((node) => node.getBoundingClientRect().right > panels.getBoundingClientRect().right + 0.5);
+          assert(!overflow, `${id} 分页中有元素超出右边界：${overflow?.outerHTML.slice(0, 80)}`);
+        }
+      }],
+      ["不透明来源 iframe：无 crypto.subtle 时各类算法、生成密钥和验签可运行", async () => {
+        const sandbox = document.createElement("iframe");
+        sandbox.sandbox = "allow-scripts";
+        sandbox.src = "./sandbox.browser.html";
+        let listener;
+        const answer = new Promise((resolve, reject) => {
+          const timer = setTimeout(() => reject(new Error("沙箱算法检查超时")), 60000);
+          listener = (event) => {
+            if (event.source !== sandbox.contentWindow || !event.data?.sandboxCheck) return;
+            clearTimeout(timer);
+            resolve(event.data);
+          };
+          window.addEventListener("message", listener);
+        });
+        document.body.append(sandbox);
+        try {
+          const result = await answer;
+          assert(result.ok, result.message ?? "沙箱算法失败");
+          assert(result.subtle === "undefined", "应禁用 WebCrypto 进行验证");
+          window.__sandboxSubtle = result.subtle;
+        } finally {
+          window.removeEventListener("message", listener);
+          sandbox.remove();
+        }
+      }],
+    ];
+
+    runScenarios(host, setup, scenarios).then((result) => writeResult({ ...result, rsaGenerationMs: window.__rsaGeneration, sandboxSubtle: window.__sandboxSubtle }));
+  </script>
+</body>
+</html>
