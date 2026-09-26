@@ -27,6 +27,10 @@
 
 > 项目处于早期阶段，目前只支持 macOS。
 
+
+https://github.com/user-attachments/assets/529072fc-3e34-4acc-8869-47c336f2e272
+
+
 ## ✨ 特性
 
 - **⚡ 一键唤起** - 默认 `⌥Space` 唤起、`Esc` 收起，快捷键可自定义；每个插件也能单独绑定全局快捷键
