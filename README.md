@@ -1,6 +1,6 @@
 <div align="center">
 
-<img src="src-tauri/icons/source.png" alt="轻匣 Logo" width="112" />
+<img src="src-tauri/icons/128x128@2x.png" alt="轻匣 Logo" width="112" />
 
 # 轻匣 QingBox
 
