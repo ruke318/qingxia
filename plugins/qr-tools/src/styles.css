@@ -1,0 +1,34 @@
+:root { font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; color: #33414b; background: transparent; font-synthesis: none; -webkit-font-smoothing: antialiased; --line: rgba(42, 49, 59, .09); --muted: #7a8690; --accent: #327f85; }
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; }
+body { overflow: hidden; }
+button, textarea { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .42; }
+button:focus-visible { outline: 2px solid #5c9caa; outline-offset: 2px; }
+
+/* 根容器透明，透出宿主面板材质；分区只用低不透明度的中性色。 */
+.qr-plugin { height: 100%; display: flex; flex-direction: column; overflow: hidden; background: transparent; }
+.workspace { flex: 1; min-height: 0; display: flex; }
+.workspace textarea { flex: 1; min-width: 0; padding: 22px 24px; border: 0; border-right: 1px solid var(--line); outline: none; resize: none; background: rgba(255, 255, 255, .3); color: #2e3d47; font-family: "SFMono-Regular", Menlo, monospace; font-size: 13px; line-height: 1.8; overflow-wrap: anywhere; }
+.workspace textarea::placeholder { color: #939eaa; }
+.preview { flex: 0 0 420px; display: grid; place-items: center; padding: 24px; }
+/* 二维码固定白底黑码，保证手机扫码的对比度。 */
+.qr-card { width: 360px; height: 360px; padding: 12px; border-radius: 14px; background: #fff; box-shadow: 0 1px 3px rgba(32, 47, 65, .08), 0 8px 28px rgba(32, 47, 65, .08); }
+.qr-card svg { display: block; width: 100%; height: 100%; }
+.qr-placeholder { width: 360px; height: 360px; display: grid; place-items: center; border: 1px dashed rgba(42, 49, 59, .18); border-radius: 14px; color: var(--muted); font-size: 12px; }
+
+.tool-bar { flex: 0 0 54px; display: flex; align-items: center; gap: 10px; padding: 0 18px; border-top: 1px solid var(--line); background: rgba(42, 49, 59, .035); font-size: 12px; }
+.status { flex: 1; min-width: 0; display: flex; align-items: center; gap: 8px; color: var(--muted); overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.status-dot { width: 5px; height: 5px; flex: 0 0 5px; border-radius: 50%; background: #9eb4ad; }
+.status.invalid { color: #ad5b58; }
+.status.invalid .status-dot { background: #c7817d; }
+.level-label { color: var(--muted); }
+.segmented { display: inline-flex; flex-shrink: 0; padding: 2px; border: 1px solid var(--line); border-radius: 7px; background: rgba(255, 255, 255, .35); }
+.segmented button { height: 26px; padding: 0 10px; border: 0; border-radius: 5px; background: transparent; color: #73848c; font-size: 12px; }
+.segmented button.active { background: rgba(255, 255, 255, .9); color: var(--accent); box-shadow: 0 1px 2px rgba(35, 63, 70, .1); font-weight: 600; }
+.text-button, .primary-button { height: 30px; padding: 0 12px; border: 1px solid transparent; border-radius: 7px; font-size: 12px; white-space: nowrap; }
+.text-button { background: transparent; color: #5d6e73; }
+.text-button:hover:not(:disabled) { background: rgba(42, 49, 59, .06); }
+.primary-button { min-width: 84px; background: #c4dcdf; color: #27696e; font-weight: 600; }
+.primary-button:hover:not(:disabled) { background: #b5d3d6; }

@@ -1,0 +1,19 @@
+{
+  "compilerOptions": {
+    "target": "ES2022",
+    "lib": ["ES2022", "DOM", "DOM.Iterable"],
+    "types": ["vite/client"],
+    "module": "ESNext",
+    "moduleResolution": "Bundler",
+    "jsx": "react-jsx",
+    "strict": true,
+    "skipLibCheck": true,
+    "noEmit": true,
+    "resolveJsonModule": true,
+    "allowImportingTsExtensions": true,
+    "noUnusedLocals": true,
+    "noUnusedParameters": true
+  },
+  "include": ["src", "packages", "plugins/json-tools/src", "plugins/hosts-switch/src", "plugins/clipboard-history/src", "vite.config.ts", "vite.plugin.config.ts", "vite.hosts.config.ts", "vite.clipboard.config.ts"],
+  "exclude": ["packages/plugin-sdk/tests"]
+}

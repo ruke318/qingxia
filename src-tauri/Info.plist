@@ -1,0 +1,12 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
+<plist version="1.0">
+<dict>
+    <key>NSDesktopFolderUsageDescription</key>
+    <string>用于搜索和打开桌面上的文件与文件夹。</string>
+    <key>NSDocumentsFolderUsageDescription</key>
+    <string>用于搜索和打开文稿目录中的文件与文件夹。</string>
+    <key>NSDownloadsFolderUsageDescription</key>
+    <string>用于搜索和打开下载目录中的文件与文件夹。</string>
+</dict>
+</plist>

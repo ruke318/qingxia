@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-leave-plugin"
+description = "Enables the leave_plugin command without any pre-configured scope."
+commands.allow = ["leave_plugin"]
+
+[[permission]]
+identifier = "deny-leave-plugin"
+description = "Denies the leave_plugin command without any pre-configured scope."
+commands.deny = ["leave_plugin"]

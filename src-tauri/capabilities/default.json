@@ -1,0 +1,7 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "main-capability",
+  "description": "轻匣主入口与设置窗口的基础事件权限",
+  "webviews": ["main"],
+  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "core:window:allow-start-dragging", "allow-get-settings", "allow-save-shortcut", "allow-hide-launcher", "allow-resize-launcher", "allow-open-settings", "allow-close-settings", "allow-complete-directory", "allow-begin-search-session", "allow-search-files", "allow-get-application-icon", "allow-open-path", "allow-list-plugin-commands", "allow-open-plugin", "allow-leave-plugin", "allow-plugin-call", "allow-list-plugins", "allow-reload-plugins", "allow-set-plugin-enabled", "allow-import-plugin", "allow-remove-plugin"]
+}

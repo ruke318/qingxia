@@ -1,0 +1,30 @@
+<!doctype html>
+<html lang="zh-CN">
+  <head>
+    <meta charset="UTF-8" />
+    <title>示例便笺</title>
+    <style>
+      /* 背景透明以透出宿主面板材质；按宿主下发的主题切换配色 */
+      :root { color-scheme: light; --text: #39424d; --muted: #85909c; --line: rgba(49, 64, 82, .16); --error: #c0392b; }
+      :root[data-theme="dark"] { color-scheme: dark; --text: #e4e8ee; --muted: #9aa4b1; --line: rgba(255, 255, 255, .14); --error: #ff7b6b; }
+      html, body { height: 100%; margin: 0; background: transparent; }
+      body { font: 14px/1.5 "PingFang SC", -apple-system, sans-serif; color: var(--text); }
+      main { height: 100%; box-sizing: border-box; display: flex; flex-direction: column; gap: 10px; padding: 16px; }
+      textarea { flex: 1; resize: none; border: 0; outline: none; background: transparent; color: inherit; font: inherit; }
+      footer { display: flex; align-items: center; justify-content: space-between; color: var(--muted); font-size: 12px; }
+      #status.error { color: var(--error); }
+      button { border: 0; border-radius: 8px; padding: 4px 12px; background: var(--line); color: inherit; font: inherit; }
+    </style>
+  </head>
+  <body>
+    <main>
+      <textarea id="note" aria-label="便笺内容" placeholder="写点什么，⌘S 保存，Esc 返回"></textarea>
+      <footer>
+        <span id="status" role="status">正在连接轻匣…</span>
+        <button id="save" type="button">保存</button>
+      </footer>
+    </main>
+    <!-- 插件 CSP 禁止内联脚本，脚本必须是包内文件并使用相对路径 -->
+    <script src="main.js"></script>
+  </body>
+</html>

@@ -1,0 +1,362 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><title>轻匣搜索回归检查</title></head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    const callbacks = new Map();
+    const listeners = new Map();
+    const pending = [];
+    const calls = [];
+    const iconWaiters = new Map();
+    const delayedIcons = new Set();
+    const failedIcons = new Set();
+    const testSearchSession = 42;
+    const retrySession = new URLSearchParams(location.search).has("session-retry");
+    let sessionInitializations = 0;
+    const iconCanvas = Object.assign(document.createElement("canvas"), { width: 64, height: 64 });
+    const iconContext = iconCanvas.getContext("2d");
+    iconContext.fillStyle = "#548ab8";
+    iconContext.fillRect(0, 0, 64, 64);
+    const testIcon = iconCanvas.toDataURL("image/png");
+    let callbackId = 0;
+    let listenerId = 0;
+    globalThis.isTauri = true;
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: (_, id) => listeners.delete(id) };
+    window.__TAURI_INTERNALS__ = {
+      transformCallback(callback) { callbacks.set(++callbackId, callback); return callbackId; },
+      invoke(command, args) {
+        calls.push({ command, args });
+        if (command === "plugin:event|listen") {
+          listeners.set(++listenerId, { event: args.event, callback: callbacks.get(args.handler) });
+          return Promise.resolve(listenerId);
+        }
+        if (command === "get_settings") return Promise.resolve({ shortcut: "Alt+Space", shortcutError: null });
+        if (command === "list_plugin_commands") return Promise.resolve([{ id: "json-tools:open", title: "JSON 编辑器", pluginName: "JSON 编辑器", keywords: ["json"], icon: testIcon }]);
+        if (command === "list_plugins") return Promise.resolve([{ id: "json-tools", name: "JSON 编辑器", version: "0.1.0", enabled: true, source: "bundled", error: null, commands: [{ id: "json-tools:open", title: "JSON 编辑器" }], icon: testIcon }]);
+        if (command === "begin_search_session") {
+          sessionInitializations += 1;
+          if (retrySession && sessionInitializations === 1) return Promise.reject(new Error("测试搜索会话初始化失败"));
+          return Promise.resolve(testSearchSession);
+        }
+        if (command === "get_application_icon") {
+          if (failedIcons.delete(args.path)) return Promise.reject(new Error("测试图标读取失败"));
+          if (delayedIcons.has(args.path)) return new Promise((resolve) => iconWaiters.set(args.path, resolve));
+          return Promise.resolve(testIcon);
+        }
+        if (command === "search_files" || command === "complete_directory") {
+          return new Promise((resolve) => pending.push({ ...args, command, resolve }));
+        }
+        return Promise.resolve();
+      },
+    };
+
+    const pause = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+    function assert(condition, description) {
+      if (!condition) throw new Error(description);
+    }
+    async function until(check, description) {
+      const deadline = Date.now() + 3000;
+      while (!check()) {
+        if (Date.now() > deadline) throw new Error(description);
+        await pause(10);
+      }
+    }
+    function input(value, options = {}) {
+      const element = document.querySelector('[role="combobox"]');
+      assert(element, "主入口输入框不存在");
+      Object.getOwnPropertyDescriptor(HTMLInputElement.prototype, "value").set.call(element, value);
+      element.dispatchEvent(new InputEvent("input", { bubbles: true, inputType: "insertText", ...options }));
+    }
+    function emit(event) {
+      for (const [id, listener] of [...listeners]) {
+        if (listener.event === event) listener.callback({ event, id, payload: null });
+      }
+    }
+    async function query(value) {
+      const before = pending.length;
+      input(value);
+      await until(() => pending.length > before, `输入“${value}”后未发起搜索`);
+      return pending.at(-1);
+    }
+    function respond(request, name) {
+      request.resolve({ requestId: request.requestId, items: [{ name, path: `/测试/${name}`, parent: "/测试", kind: "file" }], notice: null });
+    }
+    const resultName = () => document.querySelector(".result-copy strong")?.textContent;
+    const completed = [];
+
+    async function run() {
+      localStorage.setItem("qingbox:last-search-query", "恢复的搜索");
+      await import("/src/main.tsx");
+      await until(() => document.querySelector('[role="combobox"]') && [...listeners.values()].filter((item) => item.event === "launcher-focus").length === 2, "主入口监听器未就绪");
+      await until(() => pending.length > 0, "启动后没有重新查询保存的搜索词");
+      assert(document.querySelector('[role="combobox"]').value === "恢复的搜索" && pending.at(-1).query === "恢复的搜索", "启动后没有恢复保存的搜索词");
+      respond(pending.at(-1), "恢复结果.json");
+      await until(() => resultName() === "恢复结果.json", "恢复搜索词后未显示新查询结果");
+      completed.push("启动恢复最后一个搜索词，并重新查询结果");
+
+      const pluginSearch = await query("json");
+      await until(() => resultName() === "JSON 编辑器", "插件未显示为首项");
+      await until(() => document.querySelector('.result-row .plugin-icon')?.naturalWidth > 0, "搜索结果没有加载插件配置的图标");
+      const pluginField = document.querySelector('[role="combobox"]');
+      pluginField.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: "Enter", keyCode: 13 }));
+      await until(() => calls.some((item) => item.command === "open_plugin" && item.args.command === "json-tools:open"), "首项插件直接回车没有打开正确命令");
+      await until(() => document.querySelector('[aria-label="插件内容区域"]'), "直接回车后仍停留搜索列表，必须等待插件就绪才能切换");
+      respond(pluginSearch, "迟到的文件结果.json");
+      await pause();
+      assert(!resultName(), "插件打开期间，迟到文件响应重新显示了搜索列表");
+      emit("plugin-opened");
+      emit("launcher-focus");
+      await until(() => document.querySelector('[role="combobox"]').value === "json" && !document.querySelector('[aria-label="插件内容区域"]'), "从插件唤起主入口后没有恢复搜索词");
+      completed.push("首项插件直接回车立即进入插件区域，迟到文件响应不干扰打开，返回保留搜索词");
+
+      const slow = await query("慢查询");
+      const fast = await query("新查询");
+      respond(fast, "新查询.json");
+      await until(() => resultName() === "新查询.json", "新查询未显示结果");
+      respond(slow, "慢查询.json");
+      await pause();
+      assert(resultName() === "新查询.json", "旧响应覆盖了新结果");
+      completed.push("乱序回包保留新查询结果");
+
+      const clearing = await query("清空前");
+      input("");
+      await pause();
+      respond(clearing, "不应显示.json");
+      await pause();
+      assert(!resultName(), "清空输入后旧结果再次出现");
+      completed.push("清空输入后丢弃旧响应");
+
+      const closing = await query("进入设置前");
+      document.querySelector('[aria-label="设置"]').click();
+      await until(() => document.querySelector('[aria-label="轻匣设置"]'), "未进入设置");
+      await until(() => document.querySelector('.plugin-manager .plugin-icon')?.naturalWidth > 0, "插件管理没有加载插件配置的图标");
+      const resizeCount = calls.filter((item) => item.command === "resize_launcher").length;
+      respond(closing, "旧设置结果.json");
+      await pause();
+      assert(calls.filter((item) => item.command === "resize_launcher").length === resizeCount, "已卸载的查询调整了设置窗口高度");
+      document.querySelector('[aria-label="返回主入口"]').click();
+      await until(() => document.querySelector('[role="combobox"]'), "设置返回后没有主入口");
+      const returning = await query("设置返回后");
+      assert(returning.requestId > closing.requestId, "设置往返后请求身份被重复使用");
+      respond(returning, "设置返回后.json");
+      await until(() => resultName() === "设置返回后.json", "设置返回后不能搜索");
+      completed.push("设置往返保持唯一请求身份，旧请求不调整窗口");
+      completed.push("搜索结果与插件管理均展示插件声明的图标");
+
+      for (let index = 0; index < 12; index += 1) {
+        const previousQuery = document.querySelector('[role="combobox"]').value;
+        const previousResult = resultName();
+        const beforeWake = pending.length;
+        const beforeResize = calls.filter((item) => item.command === "resize_launcher").length;
+        emit("launcher-focus");
+        const retainedField = document.querySelector('[role="combobox"]');
+        assert(retainedField.value === previousQuery && resultName() === previousResult, "重新唤起丢失搜索词或已有结果");
+        assert(retainedField.selectionStart === 0 && retainedField.selectionEnd === previousQuery.length, "重新唤起未全选搜索词");
+        await until(() => pending.length > beforeWake, "保留搜索词后未重新查询");
+        assert(pending.at(-1).query === previousQuery, "重新查询时搜索词变化");
+        assert(calls.filter((item) => item.command === "resize_launcher").length > beforeResize, "同样结果数量重新唤起时未恢复列表高度");
+        respond(pending.at(-1), `刷新结果${index}.json`);
+        await until(() => resultName() === `刷新结果${index}.json`, "重新唤起后未更新搜索结果");
+        const request = await query(`连续搜索${index}`);
+        respond(request, `结果${index}.json`);
+        await until(() => resultName() === `结果${index}.json`, "连续搜索后丢失结果");
+      }
+      assert([...listeners.values()].filter((item) => item.event === "launcher-focus").length === 2, "重新唤起后重复注册监听器");
+      assert(localStorage.getItem("qingbox:last-search-query") === "连续搜索11", "输入变化后未保存最后一个搜索词");
+      completed.push("连续唤起 12 轮保留搜索词与结果、全选输入、恢复高度并重新查询，无监听器累积");
+
+      const repeating = await query("同词再次搜索");
+      emit("launcher-focus");
+      const before = pending.length;
+      input("同词再次搜索");
+      await until(() => pending.length > before, "快速唤起后输入相同关键词没有重新搜索");
+      respond(repeating, "过期同词结果.json");
+      respond(pending.at(-1), "重新搜索结果.json");
+      await until(() => resultName() === "重新搜索结果.json", "快速唤起后相同关键词丢失结果");
+      completed.push("唤起刷新与相同关键词输入紧邻时仍重新搜索，丢弃过期同词响应");
+
+      const field = document.querySelector('[role="combobox"]');
+      const actionCount = () => calls.filter((item) => ["open_path", "hide_launcher"].includes(item.command)).length;
+      const resizeCallCount = () => calls.filter((item) => item.command === "resize_launcher").length;
+      const composition = (type, data) => field.dispatchEvent(new CompositionEvent(type, { bubbles: true, data }));
+      const key = (name, options = {}) => field.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, key: name, ...options }));
+      const interrupted = await query("组合前的未完成查询");
+      const beforeComposition = pending.length;
+      const beforeCompositionResize = resizeCallCount();
+      composition("compositionstart", "");
+      composition("compositionupdate", "en'ze");
+      input("en'ze", { isComposing: true, inputType: "insertCompositionText", data: "en'ze" });
+      respond(interrupted, "不应显示的旧结果.json");
+      await pause(150);
+      assert(pending.length === beforeComposition, "组合期间发起了未提交拼音的搜索");
+      assert(!resultName(), "组合期间仍展示旧查询结果");
+      assert(resizeCallCount() === beforeCompositionResize, "组合开始或旧结果回包调整了原生窗口尺寸");
+      const beforeCommit = pending.length;
+      const beforeKeys = actionCount();
+      key("Enter", { isComposing: true, keyCode: 13 });
+      key("Escape", { isComposing: true, keyCode: 27 });
+      composition("compositionupdate", "恩泽");
+      input("恩泽", { isComposing: true, inputType: "insertCompositionText", data: "恩泽" });
+      await pause(150);
+      assert(pending.length === beforeCommit, "选词未结束时提前搜索中文候选");
+      assert(resizeCallCount() === beforeCompositionResize, "选词未结束时调整了原生窗口尺寸");
+      composition("compositionend", "恩泽");
+      input("恩泽", { isComposing: false, inputType: "insertText", data: "恩泽" });
+      await until(() => pending.length > beforeCommit, "组合输入结束后未搜索中文词");
+      const chinese = pending.at(-1);
+      assert(chinese.query === "恩泽" && chinese.command === "search_files", "中文词未原样发送到文件搜索");
+      assert(field.value === "恩泽", "组合输入结束后输入框丢失中文");
+      assert(actionCount() === beforeKeys, "组合输入期间回车或 Escape 误触发应用操作");
+      respond(chinese, "恩泽医院.json");
+      await until(() => resultName() === "恩泽医院.json", "中文响应未显示");
+      await pause(100);
+      assert(pending.length === beforeCommit + 1, "一次组合提交重复发起查询");
+      assert(resizeCallCount() > beforeCompositionResize, "选词完成后没有恢复窗口尺寸更新");
+      completed.push("组合期间暂停查询并丢弃旧结果；compositionend 前已有中文仍仅在结束时搜索一次");
+
+      const beforeSecondComposition = pending.length;
+      const beforeSecondResize = resizeCallCount();
+      composition("compositionstart", "");
+      input("yi'yuan", { isComposing: true, inputType: "insertCompositionText", data: "yi'yuan" });
+      await pause(150);
+      assert(pending.length === beforeSecondComposition, "第二轮组合期间发起拼音搜索");
+      assert(!resultName(), "新组合开始后仍展示上一轮中文结果");
+      assert(resizeCallCount() === beforeSecondResize, "第二轮组合期间调整了原生窗口尺寸");
+      const beforeSafariCommit = pending.length;
+      const beforeSafariKeys = actionCount();
+      const activeBefore = field.getAttribute("aria-activedescendant");
+      composition("compositionend", "医院");
+      key("Enter", { isComposing: false, keyCode: 229 });
+      assert(key("ArrowDown", { isComposing: false, keyCode: 229 }), "keyCode 229 的方向键被应用拦截");
+      key("Escape", { isComposing: false, keyCode: 229 });
+      input("医院", { isComposing: false, inputType: "insertText", data: "医院" });
+      await until(() => pending.length > beforeSafariCommit, "compositionend 后的最终中文未触发搜索");
+      const safariChinese = pending.at(-1);
+      assert(safariChinese.query === "医院" && safariChinese.command === "search_files", "compositionend 后的中文查询内容错误");
+      assert(actionCount() === beforeSafariKeys, "keyCode 229 误触发打开或隐藏");
+      assert(field.getAttribute("aria-activedescendant") === activeBefore, "keyCode 229 误触发结果导航");
+      respond(safariChinese, "医院说明.pdf");
+      await until(() => resultName() === "医院说明.pdf", "第二轮中文响应未显示");
+      await pause(100);
+      assert(pending.length === beforeSafariCommit + 1, "compositionend 后重复或提前查询了中间态");
+      key("Enter", { isComposing: false, keyCode: 13 });
+      await pause();
+      assert(calls.some((item) => item.command === "open_path" && item.args.path === "/测试/医院说明.pdf"), "选词完成后的普通回车未打开中文结果");
+      completed.push("中文在 compositionend 后更新：keyCode 229 不提交，完成后的普通回车正常打开");
+
+      composition("compositionstart", "");
+      input("wei'wan'cheng", { isComposing: true, inputType: "insertCompositionText", data: "wei'wan'cheng" });
+      emit("launcher-focus");
+      const resetComposition = await query("重新唤起中文");
+      respond(resetComposition, "重新唤起中文.json");
+      await until(() => resultName() === "重新唤起中文.json", "唤起后组合状态未重置，搜索被持续暂停");
+      completed.push("组合期间重新唤起会重置组合状态并恢复搜索");
+
+      const directory = await query("/测试/目标目录/");
+      assert(directory.command === "complete_directory", "目录路径未发送到目录查询");
+      directory.resolve({ requestId: directory.requestId, notice: null, items: [
+        { name: "目标目录", path: "/测试/目标目录", parent: "/测试", kind: "directory" },
+        { name: "报告.json", path: "/测试/目标目录/报告.json", parent: "/测试/目标目录", kind: "file" },
+      ] });
+      await until(() => resultName() === "目标目录", "目录自身没有显示为首项");
+      key("Enter", { keyCode: 13 });
+      await until(() => calls.some((item) => item.command === "open_path" && item.args.path === "/测试/目标目录"), "首项回车未打开目录自身");
+      key("ArrowDown", { keyCode: 40 });
+      await until(() => document.querySelector(".result-row.active .result-copy strong")?.textContent === "报告.json", "下箭头未选中目录内的文件");
+      key("Enter", { keyCode: 13 });
+      await until(() => calls.some((item) => item.command === "open_path" && item.args.path === "/测试/目标目录/报告.json"), "选中文件后未按完整路径打开");
+      completed.push("目录自身作为首项可回车打开，下箭头可选择并打开子文件");
+
+      const application = await query("终端");
+      application.resolve({ requestId: application.requestId, notice: null, items: [
+        { name: "终端", path: "/Applications/Utilities/Terminal.app", parent: "/Applications/Utilities", kind: "application" },
+      ] });
+      await until(() => resultName() === "终端", "应用查询结果未显示");
+      assert(document.querySelector(".result-row.active .result-kind")?.textContent === "应用", "应用结果未显示应用类型标签");
+      await until(() => document.querySelector(".result-row.active .application-icon img")?.naturalWidth > 0, "应用结果未加载真实图标");
+      const beforeApplicationTab = pending.length;
+      assert(key("Tab", { keyCode: 9 }), "应用上的 Tab 被当成目录补全拦截");
+      await pause(150);
+      assert(pending.length === beforeApplicationTab && field.value === "终端", "Tab 钻入了应用包目录");
+      key("Enter", { keyCode: 13 });
+      await until(() => calls.some((item) => item.command === "open_path" && item.args.path === "/Applications/Utilities/Terminal.app"), "回车未使用应用包完整路径打开应用");
+      completed.push("应用显示独立类型与图标，Tab 不进入应用包，回车打开完整 .app 路径");
+
+      const iconCalls = (path) => calls.filter((item) => item.command === "get_application_icon" && item.args.path === path).length;
+      const appItem = (name, path) => ({ name, path, parent: "/测试", kind: "application" });
+      const sharedIconPath = "/测试/共享图标.app";
+      const hiddenIconPath = "/测试/屏外图标.app";
+      document.getElementById("root").style.height = "208px";
+      const visibleIcons = await query("可见图标");
+      visibleIcons.resolve({ requestId: visibleIcons.requestId, notice: null, items: [
+        appItem("共享图标一", sharedIconPath),
+        appItem("共享图标二", sharedIconPath),
+        ...Array.from({ length: 10 }, (_, index) => ({ name: `普通文件${index}.json`, path: `/测试/普通文件${index}.json`, parent: "/测试", kind: "file" })),
+        appItem("屏外图标", hiddenIconPath),
+      ] });
+      await until(() => document.querySelectorAll(".application-icon img").length === 2 && [...document.querySelectorAll(".application-icon img")].every((image) => image.naturalWidth > 0), "可见应用图标未加载完成");
+      assert(iconCalls(sharedIconPath) === 1, "相同路径的可见应用重复读取图标");
+      assert(iconCalls(hiddenIconPath) === 0, "屏外应用提前读取了图标");
+      assert(document.querySelector(".result-row").getBoundingClientRect().height === 58, "图标加载改变了结果行高度");
+      const loadedImage = document.querySelector(".application-icon img");
+      assert(loadedImage.alt === "" && loadedImage.getBoundingClientRect().width === 30, "应用图标尺寸或替代文本错误");
+      const resultList = document.querySelector(".results");
+      resultList.scrollTop = resultList.scrollHeight;
+      await until(() => iconCalls(hiddenIconPath) === 1, "滚动到可见区域后没有加载应用图标");
+      completed.push("真实 IntersectionObserver 仅加载可见图标，相同路径复用请求且不改变行布局");
+
+      const delayedPath = "/测试/缓慢图标.app";
+      delayedIcons.add(delayedPath);
+      const slowIconQuery = await query("慢图标");
+      slowIconQuery.resolve({ requestId: slowIconQuery.requestId, notice: null, items: [appItem("慢图标", delayedPath)] });
+      await until(() => resultName() === "慢图标" && iconWaiters.has(delayedPath), "图标等待期间未展示应用结果");
+      assert(document.querySelector(".file-icon-application"), "图标等待期间缺少应用占位图标");
+      const duringIconLoad = await query("继续搜索文件");
+      respond(duringIconLoad, "图标未返回也能搜索.json");
+      await until(() => resultName() === "图标未返回也能搜索.json", "慢图标阻塞了下一次搜索");
+      iconWaiters.get(delayedPath)(testIcon);
+      await pause(100);
+      assert(!document.querySelector(".application-icon img"), "已卸载应用的旧图标覆盖了新文件结果");
+
+      const cachedAgain = await query("再次显示共享应用");
+      cachedAgain.resolve({ requestId: cachedAgain.requestId, notice: null, items: [appItem("共享图标再次显示", sharedIconPath)] });
+      await until(() => document.querySelector(".application-icon img")?.naturalWidth > 0, "重新显示应用未使用缓存图标");
+      assert(iconCalls(sharedIconPath) === 1, "跨搜索重新显示同一路径时未复用图标缓存");
+      completed.push("慢图标不阻塞结果或后续搜索，旧图标不覆盖新结果，跨搜索复用缓存");
+
+      const failedPath = "/测试/失败后重试.app";
+      failedIcons.add(failedPath);
+      const firstFailure = await query("图标失败");
+      firstFailure.resolve({ requestId: firstFailure.requestId, notice: null, items: [appItem("图标失败", failedPath)] });
+      await until(() => iconCalls(failedPath) === 1, "未执行首次图标读取");
+      await pause();
+      assert(document.querySelector(".file-icon-application") && !document.querySelector(".application-icon img"), "图标失败后未保留占位图标");
+      emit("launcher-focus");
+      const retryIcon = await query("重试图标");
+      retryIcon.resolve({ requestId: retryIcon.requestId, notice: null, items: [appItem("图标重试成功", failedPath)] });
+      await until(() => document.querySelector(".application-icon img")?.naturalWidth > 0, "失败图标再次出现时未能重试");
+      assert(iconCalls(failedPath) === 2, "失败的图标 Promise 未从缓存中删除");
+      document.getElementById("root").style.height = "";
+      completed.push("图标失败回退占位，下次显示可重新读取");
+
+      assert(sessionInitializations === (retrySession ? 2 : 1), "多次搜索或设置往返重复初始化搜索会话，或失败会话未能重试");
+      assert(pending.filter((request) => request.command === "search_files").every((request) => request.querySession === testSearchSession), "文件搜索没有携带相同的后端会话编号");
+      assert(pending.filter((request) => request.command === "complete_directory").every((request) => !("querySession" in request)), "目录查询不应携带搜索会话编号");
+      assert(pending.every((request) => request.limit === 50), "文件搜索或目录查询没有限制为前 50 项");
+      completed.push(retrySession ? "会话初始化失败后可重试，成功后全程复用同一后端会话" : "连续搜索与设置往返只初始化一次会话，文件搜索均携带同一会话编号");
+      completed.push("文件搜索与目录查询均只请求前 50 项");
+      return { passed: true, completed, queryCount: pending.length, sessionInitializations };
+    }
+
+    window.__launcherRegression = run().catch((error) => ({ passed: false, completed, error: error.message }));
+    window.__launcherRegression.then((result) => {
+      const output = document.createElement("pre");
+      output.id = "regression-result";
+      output.style.cssText = "position:fixed;inset:0;overflow:auto;background:white;color:black;padding:16px;z-index:10";
+      output.textContent = JSON.stringify(result, null, 2);
+      document.body.append(output);
+    });
+  </script>
+</body>
+</html>

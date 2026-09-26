@@ -1,0 +1,83 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>插件移除回归检查</title></head>
+<body style="margin:0;width:720px">
+  <div id="root"></div>
+  <script type="module">
+    import React from "react";
+    import { createRoot } from "react-dom/client";
+    import { PluginManager } from "../src/features/plugins/PluginManager.tsx";
+
+    const plugins = [
+      { id: "json-tools", name: "JSON 编辑器", source: "bundled" },
+      { id: "crypto-tools", name: "编码工具", source: "local" },
+    ].map((item) => ({ ...item, version: "0.1.1", enabled: true, error: null, icon: null, commands: [{ id: `${item.id}:open`, title: item.name }] }));
+    const calls = [];
+    let fail = false;
+    let finish;
+    globalThis.isTauri = true;
+    window.__TAURI_INTERNALS__ = { invoke(command, args) {
+      calls.push({ command, args });
+      if (command === "list_plugins") return Promise.resolve(plugins);
+      if (command === "remove_plugin") {
+        if (fail) return Promise.reject("测试移除失败");
+        return new Promise((resolve) => { finish = () => resolve(plugins.filter((item) => item.id !== args.id)); });
+      }
+      throw new Error(`测试收到意外命令：${command}`);
+    } };
+    createRoot(document.getElementById("root")).render(React.createElement(PluginManager));
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 10));
+    async function until(check, message) {
+      const deadline = Date.now() + 3000;
+      while (!check()) { if (Date.now() > deadline) throw new Error(message); await pause(); }
+    }
+    function assert(value, message) { if (!value) throw new Error(message); }
+    const remove = () => document.querySelector('[aria-label="移除编码工具"]');
+    const confirm = () => [...document.querySelectorAll("button")].find((button) => button.textContent === "确认移除");
+    const result = { passed: 0, total: 4, failures: [] };
+    const scenarios = [
+      ["仅本地插件显示红色移除按钮", async () => {
+        await until(remove, "本地插件缺少移除按钮");
+        assert(!document.querySelector('[aria-label="移除JSON 编辑器"]'), "内置插件不应显示移除按钮");
+        assert(getComputedStyle(remove()).color === "rgb(180, 35, 50)", "移除按钮应使用红色");
+      }],
+      ["取消确认不会执行移除", async () => {
+        remove().click();
+        await until(confirm, "未显示确认入口");
+        [...document.querySelectorAll("button")].find((button) => button.textContent === "取消").click();
+        await until(() => !confirm(), "未关闭确认入口");
+        assert(!calls.some((call) => call.command === "remove_plugin"), "取消不应发起移除");
+      }],
+      ["移除失败保留列表并允许重试", async () => {
+        fail = true;
+        remove().click();
+        await until(confirm, "未显示确认入口");
+        confirm().click();
+        await until(() => document.querySelector('[role="alert"]')?.textContent.includes("测试移除失败"), "失败未提示原因");
+        assert(remove() && !remove().disabled, "失败后应保留插件并允许重试");
+        assert(document.querySelector('[role="alert"]').closest(".plugin-manager-item") === remove().closest(".plugin-manager-item"), "错误必须位于出错的插件下面");
+        assert(!document.querySelector(".plugin-manager > [role='alert']"), "单个插件错误不应出现在列表顶部");
+      }],
+      ["确认后防止重复操作并刷新插件列表", async () => {
+        fail = false;
+        confirm().click();
+        await until(() => finish && confirm().disabled, "操作期间应禁用按钮");
+        assert(document.querySelector('[role="status"]').closest(".plugin-manager-item") === remove().closest(".plugin-manager-item"), "进度提示必须位于对应插件下面");
+        const requests = calls.filter((call) => call.command === "remove_plugin");
+        assert(requests.length === 2 && requests[1].args.id === "crypto-tools", "应仅按插件标识发起移除");
+        finish();
+        await until(() => !remove(), "成功后未从列表移除");
+        assert(document.querySelectorAll(".plugin-manager-item").length === 1, "应保留内置插件");
+        assert(!confirm(), "成功后应关闭确认入口");
+      }],
+    ];
+    for (const [scenario, run] of scenarios) {
+      try { await run(); result.passed++; } catch (error) { result.failures.push({ scenario, message: error.message }); }
+    }
+    const output = document.createElement("pre");
+    output.id = "result";
+    output.textContent = JSON.stringify(result);
+    document.body.append(output);
+  </script>
+</body>
+</html>

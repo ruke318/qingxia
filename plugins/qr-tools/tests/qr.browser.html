@@ -1,0 +1,119 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>二维码插件回归检查</title></head>
+<body>
+  <script type="module">
+    // 本页扮演宿主：iframe 加载插件框架页，经消息协议 v1 应答插件请求并记录调用
+    import QRCode from "qrcode";
+    import { mountPlugin, runScenarios, writeResult } from "../../../tests/plugin-host-mock.js";
+
+    const host = mountPlugin({
+      src: "./frame.html",
+      width: 900,
+      height: 610,
+      handlers: {
+        "view.ready": () => null,
+        "view.back": () => null,
+        "storage.get": ({ key }) => key === "text" ? "上次的内容" : null,
+        "storage.set": () => null,
+        "clipboard.writeText": () => null,
+      },
+    });
+    const calls = host.calls;
+    const pause = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+    function assert(condition, message) { if (!condition) throw new Error(message); }
+    async function until(check, message) {
+      const deadline = Date.now() + 5000;
+      while (!check()) { if (Date.now() > deadline) throw new Error(message); await pause(10); }
+    }
+
+    let win, doc, input;
+    const status = () => doc.querySelector(".status")?.textContent ?? "";
+    function type(value) {
+      // React 受控输入需走原生 value 设置器再派发 input 事件
+      Object.getOwnPropertyDescriptor(win.HTMLTextAreaElement.prototype, "value").set.call(input, value);
+      input.dispatchEvent(new win.Event("input", { bubbles: true }));
+    }
+    async function pasteImage(canvas) {
+      const blob = await new Promise((resolve) => canvas.toBlob(resolve, "image/png"));
+      const data = new win.DataTransfer();
+      data.items.add(new win.File([await blob.arrayBuffer()], "粘贴.png", { type: "image/png" }));
+      input.focus();
+      input.dispatchEvent(new win.ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
+    }
+    // 模拟截图：大画布上偏移放置二维码，四周留有其他内容
+    async function screenshotWith(text) {
+      const canvas = document.createElement("canvas");
+      canvas.width = 1600;
+      canvas.height = 1000;
+      const context = canvas.getContext("2d");
+      context.fillStyle = "#e8ecef";
+      context.fillRect(0, 0, canvas.width, canvas.height);
+      context.fillStyle = "#333";
+      context.font = "32px sans-serif";
+      context.fillText("这是一段截图里的其他文字", 80, 120);
+      const code = document.createElement("canvas");
+      await QRCode.toCanvas(code, text, { width: 300, margin: 2 });
+      context.drawImage(code, 900, 400);
+      return canvas;
+    }
+
+    async function setup() {
+      ({ win, doc } = await host.ready);
+      await until(() => doc.querySelector("textarea"), "插件未挂载");
+      input = doc.querySelector("textarea");
+      await until(() => calls.some((call) => call.method === "view.ready") && host.pending === 0, "插件未通知就绪");
+    }
+
+    const scenarios = [
+      ["恢复上次内容并生成二维码", async () => {
+        await until(() => input.value === "上次的内容", "未恢复上次保存的内容");
+        await until(() => doc.querySelector(".qr-card svg"), "未生成二维码");
+        assert(win.getComputedStyle(doc.querySelector(".qr-plugin")).backgroundColor === "rgba(0, 0, 0, 0)", "根容器背景必须透明");
+      }],
+      ["输入文字实时生成并保存", async () => {
+        const before = doc.querySelector(".qr-card").innerHTML;
+        type("https://example.com/二维码");
+        await until(() => doc.querySelector(".qr-card")?.innerHTML !== before, "输入后二维码未更新");
+        await until(() => calls.some((call) => call.method === "storage.set" && call.params.key === "text" && call.params.value === "https://example.com/二维码"), "内容未保存");
+        assert(status().includes("字节"), "状态栏未显示字节数");
+      }],
+      ["粘贴含二维码的截图：识别结果填入输入框并重新生成", async () => {
+        await pasteImage(await screenshotWith("识别测试：你好 👋 https://example.com/?a=1"));
+        await until(() => input.value === "识别测试：你好 👋 https://example.com/?a=1", "识别结果未填入输入框");
+        assert(status().includes("已识别"), "状态栏未提示识别成功");
+        await until(() => doc.querySelector(".qr-card svg"), "识别后未重新生成二维码");
+      }],
+      ["粘贴没有二维码的图片：提示未识别且不改动内容", async () => {
+        const before = input.value;
+        const canvas = document.createElement("canvas");
+        canvas.width = 400;
+        canvas.height = 300;
+        canvas.getContext("2d").fillRect(40, 40, 100, 100);
+        await pasteImage(canvas);
+        await until(() => status().includes("没有识别到二维码"), "未提示没有识别到二维码");
+        assert(doc.querySelector(".status").classList.contains("invalid"), "未识别时状态应标为错误");
+        assert(input.value === before, "未识别时不应改动内容");
+      }],
+      ["复制文字调用宿主剪贴板", async () => {
+        doc.querySelector(".primary-button").click();
+        await until(() => calls.some((call) => call.method === "clipboard.writeText" && call.params.text === input.value), "复制未调用 clipboard.writeText");
+        await until(() => status().includes("已复制"), "复制后未提示");
+      }],
+      ["内容超出容量时提示并不显示二维码", async () => {
+        type("字".repeat(3000));
+        await until(() => status().includes("内容太长"), "超出容量未提示");
+        assert(!doc.querySelector(".qr-card"), "超出容量时不应显示二维码");
+        type("恢复");
+        await until(() => doc.querySelector(".qr-card svg"), "恢复短内容后未重新生成");
+      }],
+      ["Esc 返回主入口", async () => {
+        input.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        await until(() => calls.some((call) => call.method === "view.back"), "Esc 未调用 view.back");
+      }],
+    ];
+
+    runScenarios(host, setup, scenarios).then(writeResult);
+  </script>
+</body>
+</html>

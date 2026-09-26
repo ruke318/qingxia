@@ -1,0 +1,131 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>剪贴板插件回归检查</title></head>
+<body style="margin:0;background:#dce5df">
+<script type="module">
+  // 本页扮演宿主：iframe 加载插件框架页，经消息协议 v1 应答插件请求并记录调用
+  import { HostError, mountPlugin, runScenarios, writeResult } from '../../../tests/plugin-host-mock.js';
+  const thumbnail = 'data:image/svg+xml,' + encodeURIComponent('<svg xmlns="http://www.w3.org/2000/svg" width="400" height="260"><rect width="400" height="260" fill="#d8e9e3"/><circle cx="275" cy="92" r="40" fill="#fbf8e5"/><path d="M0 230 125 90 275 260H0" fill="#538a7d"/><path d="M190 260 305 140 400 225V260" fill="#7daa98"/></svg>');
+  let items = [
+    { id: 1, kind: 'text', preview: '接口联调记录\n测试环境已就绪，下午核对支付回调与退款结果。', createdAt: Date.now(), bytes: 120, width: 0, height: 0, thumbnail: null, files: [] },
+    { id: 2, kind: 'text', preview: '{\n  "status": "success",\n  "message": "保存成功"\n}', createdAt: Date.now() - 60000, bytes: 64, width: 0, height: 0, thumbnail: null, files: [] },
+    { id: 3, kind: 'text', preview: 'https://example.com/docs', createdAt: Date.now() - 180000, bytes: 24, width: 0, height: 0, thumbnail: null, files: [] },
+    { id: 4, kind: 'file', preview: '接口说明.pdf、测试数据.json', createdAt: Date.now(), bytes: 120, width: 0, height: 0, thumbnail: null, files: ['/示例/接口说明.pdf', '/示例/测试数据.json'] },
+    { id: 5, kind: 'image', preview: '400 × 260', createdAt: Date.now(), bytes: 24800, width: 400, height: 260, thumbnail, files: [] },
+  ];
+  let revision = 1, shortcut = 'Alt+Shift+V', failNext = false, holdKind = null, releaseList;
+  // 框架页内 #root 固定 685×610 且上下左右留 24px，iframe 按此留足空间
+  const host = mountPlugin({
+    src: './frame.html',
+    width: 733,
+    height: 658,
+    handlers: {
+      'clipboard.list': async (params) => {
+        if (holdKind === params.kind) { holdKind = null; await new Promise((resolve) => { releaseList = resolve; }); }
+        return { revision, counts: Object.fromEntries(['text','image','file'].map((kind) => [kind, items.filter((item) => item.kind === kind).length])), items: params.since === revision ? null : items.filter((item) => params.kind === 'all' || item.kind === params.kind).sort((a, b) => b.createdAt - a.createdAt || b.id - a.id), notice: null };
+      },
+      'clipboard.copy': () => { if (failNext) { failNext = false; throw new HostError('not_found', '文件已移动或删除，请重新复制'); } revision += 1; return null; },
+      'clipboard.writeText': () => null,
+      'shortcuts.get': () => shortcut,
+      'shortcuts.set': (params) => { shortcut = params.shortcut; return null; },
+      'view.ready': () => null,
+      'view.back': () => null,
+      'view.hide': () => null,
+      'view.drag': () => null,
+    },
+  });
+  const calls = host.calls;
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 20));
+  async function until(check, reason) { const deadline = Date.now() + 4000; while (!check()) { if (Date.now() > deadline) throw new Error(reason); await pause(); } }
+  const assert = (check, reason) => { if (!check) throw new Error(reason); };
+  // 有意遮蔽全局 document 与 window：以下场景中二者均指 iframe 内插件的文档和窗口，便于逐条保留原断言
+  let window, document;
+  const tab = (kind) => [...document.querySelectorAll('[role="tab"]')].find((element) => element.textContent.startsWith(kind));
+  const records = () => [...document.querySelectorAll('.record')];
+  const copied = () => calls.filter((call) => call.method === 'clipboard.copy');
+  async function copyFirst(id) {
+    records()[0].click();
+    await until(() => document.querySelector('.record.copied') && !records()[0].disabled, '点击后没有复制反馈');
+    assert(copied().at(-1).params.id === id, '复制的不是当前分类对应原记录');
+  }
+  const labels = { text: '文本', image: '图片', file: '文件' };
+
+  async function setup() {
+    ({ win: window, doc: document } = await host.ready);
+    await until(() => records().length === 5 && document.querySelector('.shortcut-trigger').textContent.includes('⌥⇧V'), '全部历史或默认快捷键没有加载');
+  }
+
+  const scenarios = [
+    ['默认全部分类混合展示三类记录、总数与时间顺序正确，点击复制原记录', async () => {
+      assert(tab('全部').getAttribute('aria-selected') === 'true' && tab('全部').textContent.includes('5'), '全部不是默认分类或总数不正确');
+      assert(document.querySelector('.image-preview img') && document.querySelector('.file-preview') && document.querySelector('.text-preview'), '全部分类没有同时展示三种记录');
+      const ordered = items.slice().sort((a, b) => b.createdAt - a.createdAt || b.id - a.id);
+      assert(records().every((element, index) => element.getAttribute('aria-label') === `复制${labels[ordered[index].kind]}：${ordered[index].preview.slice(0, 80)}`), '全部列表没有按最近时间排序');
+      await copyFirst(5);
+    }],
+    ['文本历史、分类计数、默认快捷键与点击复制正常', async () => {
+      tab('文本').click();
+      await until(() => records().length === 3, '文本分类没有筛选');
+      assert(tab('文本').getAttribute('aria-selected') === 'true' && tab('图片').textContent.includes('1') && tab('文件').textContent.includes('1'), '分类与数量不正确');
+      await copyFirst(1);
+    }],
+    ['图片预览、多个文件展示及按原记录复制，不把图片或文件路径当文本', async () => {
+      tab('图片').click();
+      await until(() => document.querySelector('.image-preview img')?.complete && records().length === 1, '图片缩略图未显示');
+      assert(document.querySelector('.record-meta').textContent.includes('400 × 260'), '图片尺寸未显示');
+      await copyFirst(5);
+      tab('文件').click();
+      await until(() => document.querySelector('.file-preview'), '文件分类未显示');
+      assert(document.querySelector('.file-preview').textContent.includes('等 2 项') && document.querySelector('.file-preview').textContent.includes('/示例/测试数据.json'), '多个文件的名称和路径不完整');
+      await copyFirst(4);
+      assert(!calls.some((call) => call.method === 'clipboard.writeText'), '图片或文件不能通过文本接口复制');
+    }],
+    ['文件失效显示错误，可重试且没有虚假的复制成功状态', async () => {
+      failNext = true;
+      records()[0].click();
+      await until(() => document.querySelector('[role="alert"]'), '复制失败未显示提示');
+      assert(!document.querySelector('.record.copied'), '失败时不能显示复制成功');
+      await copyFirst(4);
+    }],
+    ['快速切换分类时迟到响应不覆盖当前列表', async () => {
+      holdKind = 'image';
+      tab('图片').click();
+      await until(() => releaseList, '未挂起图片列表响应');
+      tab('文本').click();
+      await until(() => records().length === 3, '切回文本失败');
+      releaseList();
+      await pause();
+      assert(!document.querySelector('.image-preview') && records().length === 3, '迟到图片响应覆盖了文本分类');
+    }],
+    ['新复制内容自动出现，未变化时使用版本号避免重复传输', async () => {
+      items = [{ ...items[0], id: 8, createdAt: Date.now(), preview: '刚刚复制的新内容' }, ...items]; revision += 1;
+      await until(() => records().length === 4 && records()[0].textContent.includes('刚刚复制'), '后台新增内容没有自动刷新');
+      const beforePoll = calls.length;
+      await until(() => calls.slice(beforePoll).some((call) => call.method === 'clipboard.list' && call.params.since === revision), '刷新没有携带版本号');
+    }],
+    ['方向键和回车复制、全局快捷键修改与显示正常', async () => {
+      window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'ArrowDown', cancelable: true }));
+      await pause();
+      window.dispatchEvent(new window.KeyboardEvent('keydown', { key: 'Enter', cancelable: true }));
+      await until(() => copied().at(-1).params.id === 8, '键盘选择后回车没有复制');
+      document.querySelector('.shortcut-trigger').click();
+      await until(() => document.querySelector('[aria-label="剪贴板全局快捷键"]'), '快捷键设置未打开');
+      document.querySelector('[aria-label="剪贴板全局快捷键"]').dispatchEvent(new window.KeyboardEvent('keydown', { key: 'v', code: 'KeyV', metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+      await pause();
+      document.querySelector('.save-button').click();
+      await until(() => shortcut === 'Super+Shift+V' && !document.querySelector('[role="dialog"]'), '快捷键未保存');
+      assert(document.querySelector('.shortcut-trigger').textContent.includes('⌘⇧V'), '新快捷键未显示');
+    }],
+    ['四个分类切换及最新记录均正常，固定内容区未溢出', async () => {
+      assert(document.getElementById('root').scrollHeight === 610, '界面超出固定 610px 区域');
+      tab('全部').click();
+      await until(() => records().length === 6, '切回全部没有读取最新三类记录');
+      assert(tab('全部').textContent.includes('6') && records()[0].textContent.includes('刚刚复制'), '全部分类数量或最新记录不正确');
+      assert(document.getElementById('root').scrollHeight === 610, '全部分类超出固定内容区');
+    }],
+  ];
+
+  // 带 ?preview 时只挂载插件供人工查看，不执行场景
+  if (!new URLSearchParams(location.search).has('preview')) {
+    runScenarios(host, setup, scenarios).then((result) => writeResult({ ...result, copiedIds: copied().map((call) => call.params.id) }));
+  }
+</script></body></html>

@@ -1,0 +1,47 @@
+{
+  "$schema": "https://schema.tauri.app/config/2",
+  "productName": "轻匣",
+  "version": "0.1.0",
+  "identifier": "local.qingbox.desktop",
+  "build": {
+    "beforeDevCommand": "npm run build:plugin && npm run dev",
+    "devUrl": "http://127.0.0.1:1420",
+    "beforeBuildCommand": "npm run build",
+    "frontendDist": "../dist"
+  },
+  "app": {
+    "macOSPrivateApi": true,
+    "windows": [{
+      "label": "main",
+      "title": "轻匣",
+      "width": 900,
+      "minWidth": 900,
+      "height": 60,
+      "visible": false,
+      "decorations": false,
+      "transparent": true,
+      "acceptFirstMouse": true,
+      "theme": "Light",
+      "resizable": false,
+      "alwaysOnTop": true,
+      "visibleOnAllWorkspaces": true,
+      "skipTaskbar": true,
+      "shadow": false,
+      "windowEffects": {
+        "effects": ["popover"],
+        "state": "active",
+        "radius": 18
+      }
+    }],
+    "security": {
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; frame-src qingbox-plugin:"
+    }
+  },
+  "bundle": {
+    "active": true,
+    "targets": ["app"],
+    "icon": ["icons/128x128.png"],
+    "resources": { "resources/plugins/": "plugins/" },
+    "macOS": { "minimumSystemVersion": "13.0", "infoPlist": "Info.plist", "signingIdentity": "-" }
+  }
+}

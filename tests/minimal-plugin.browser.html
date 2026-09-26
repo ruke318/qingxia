@@ -1,0 +1,79 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>最小示例插件回归检查</title></head>
+<body>
+<script type="module">
+  // 本页扮演宿主：加载 examples/minimal-plugin（不经 SDK、不经构建），验证握手、view.ready 与 storage 读写
+  import { HostError, mountPlugin, runScenarios, writeResult } from "./plugin-host-mock.js";
+
+  const store = new Map([["note", { text: "上次保存的便笺", savedAt: 1 }]]);
+  let failNextSet = false;
+  const host = mountPlugin({
+    src: "../examples/minimal-plugin/index.html",
+    width: 685,
+    height: 400,
+    handlers: {
+      "storage.get": ({ key }) => store.get(key) ?? null,
+      "storage.set": ({ key, value }) => {
+        if (failNextSet) { failNextSet = false; throw new HostError("invalid_params", "草稿超过 16 MB，无法保存"); }
+        store.set(key, value);
+        return null;
+      },
+      "view.ready": () => null,
+      "view.back": () => null,
+    },
+  });
+  const calls = host.calls;
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 15));
+  async function until(test, label) { const end = Date.now() + 3000; while (!test()) { if (Date.now() > end) throw new Error(label); await pause(); } }
+  const assert = (test, label) => { if (!test) throw new Error(label); };
+  let win, doc;
+  const note = () => doc.getElementById("note");
+  const status = () => doc.getElementById("status");
+  const key = (init) => note().dispatchEvent(new win.KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+
+  async function setup() {
+    ({ win, doc } = await host.ready);
+    await until(() => calls.some((call) => call.method === "view.ready"), "插件握手后未调用 view.ready");
+  }
+
+  const result = await runScenarios(host, setup, [
+    ["握手后先读取存储再调用 view.ready", async () => {
+      assert(calls[0].method === "storage.get" && calls[0].params.key === "note", `首个调用应为 storage.get：${JSON.stringify(calls[0])}`);
+      assert(calls[1].method === "view.ready", "第二个调用应为 view.ready");
+      assert(note().value === "上次保存的便笺", "应显示存储中的内容");
+      assert(doc.documentElement.dataset.theme === "light", "应按握手的 theme 设置外观");
+    }],
+    ["view.shown 时插件自行聚焦编辑区", async () => {
+      host.emit("view.shown");
+      await until(() => doc.activeElement === note(), "收到 view.shown 后未聚焦编辑区");
+    }],
+    ["⌘S 写入 storage.set", async () => {
+      note().value = "新的便笺 ✓";
+      const before = calls.length;
+      key({ key: "s", metaKey: true });
+      await until(() => status().textContent === "已保存", "保存后未提示已保存");
+      const call = calls.slice(before).find((item) => item.method === "storage.set");
+      assert(call && call.params.key === "note" && call.params.value.text === "新的便笺 ✓", `保存参数不正确：${JSON.stringify(call)}`);
+      assert(store.get("note").text === "新的便笺 ✓", "模拟宿主未收到新内容");
+    }],
+    ["宿主错误按错误码与中文消息展示", async () => {
+      failNextSet = true;
+      doc.getElementById("save").click();
+      await until(() => status().textContent === "草稿超过 16 MB，无法保存（invalid_params）", "未展示宿主返回的错误");
+      assert(status().classList.contains("error"), "错误提示应带错误样式");
+    }],
+    ["theme.changed 切换外观", async () => {
+      host.emit("theme.changed", { theme: "dark" });
+      await until(() => doc.documentElement.dataset.theme === "dark", "未切换到深色外观");
+    }],
+    ["Esc 调用 view.back", async () => {
+      key({ key: "Escape" });
+      await until(() => calls.some((call) => call.method === "view.back"), "Esc 未调用 view.back");
+      assert(host.pending === 0, "不应有未应答的请求");
+    }],
+  ]);
+  writeResult(result);
+</script>
+</body>
+</html>

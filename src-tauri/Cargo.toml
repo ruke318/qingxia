@@ -1,0 +1,41 @@
+[package]
+name = "qingbox"
+version = "0.1.0"
+description = "轻匣：面向 macOS 的悬浮搜索入口"
+license = "MIT"
+edition = "2021"
+rust-version = "1.88"
+
+[lib]
+name = "qingbox_lib"
+crate-type = ["staticlib", "cdylib", "rlib"]
+
+[build-dependencies]
+tauri-build = { version = "=2.6.3", features = [] }
+
+[dependencies]
+tauri = { version = "=2.11.5", features = ["tray-icon", "macos-private-api", "unstable"] }
+serde = { version = "1", features = ["derive"] }
+serde_json = "1"
+percent-encoding = "2"
+sha2 = "0.10"
+base64 = "0.22"
+libc = "0.2"
+anyhow = "1"
+dirs = "6"
+rusqlite = { version = "0.37", features = ["bundled"] }
+tauri-plugin-global-shortcut = "2"
+tokio = { version = "1", features = ["process", "time", "io-util", "sync", "macros"] }
+getrandom = "0.3"
+
+[target.'cfg(target_os = "macos")'.dependencies]
+core-foundation = "0.10.1"
+tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "d2ab66f81b2c76f651f7e014680cc67b306ed330" }
+objc2 = "0.6.4"
+block2 = "0.6.2"
+objc2-app-kit = { version = "0.3.2", features = ["NSScreen", "NSEvent", "NSWindow", "NSApplication"] }
+objc2-foundation = { version = "0.3.2", features = ["NSGeometry"] }
+
+# 插件 iframe 的 IPC 加固：只接受主 frame 的脚本消息，说明见 patches/wry/轻匣补丁说明.md。
+[patch.crates-io]
+wry = { path = "patches/wry" }

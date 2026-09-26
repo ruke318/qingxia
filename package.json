@@ -1,0 +1,45 @@
+{
+  "name": "qingbox",
+  "version": "0.1.0",
+  "private": true,
+  "type": "module",
+  "description": "轻匣：面向 macOS 的悬浮搜索入口",
+  "license": "MIT",
+  "scripts": {
+    "dev": "vite --host 127.0.0.1 --port 1420 --strictPort",
+    "build": "tsc --noEmit && vite build && npm run build:plugin",
+    "preview": "vite preview --host 127.0.0.1",
+    "tauri": "tauri",
+    "build:plugin": "vite build --config vite.plugin.config.ts && vite build --config vite.hosts.config.ts && vite build --config vite.clipboard.config.ts",
+    "dev:plugin": "vite --config vite.plugin.config.ts --host 127.0.0.1 --port 1422 --strictPort",
+    "test:json": "node --experimental-strip-types --test plugins/json-tools/tests/*.test.ts",
+    "test:sdk": "node --experimental-strip-types --test packages/plugin-sdk/tests/*.test.ts",
+    "test:bridge": "node --experimental-strip-types --test tests/plugin-bridge.test.ts",
+    "test:browser": "node tests/run-plugin-browser-tests.mjs",
+    "build:qr": "tsc --noEmit -p plugins/qr-tools/tsconfig.json && vite build --config vite.qr.config.ts",
+    "test:qr": "node --experimental-strip-types --test plugins/qr-tools/tests/*.test.ts"
+  },
+  "dependencies": {
+    "@codemirror/commands": "^6.11.1",
+    "@codemirror/lang-json": "^6.0.2",
+    "@codemirror/lang-xml": "^6.1.0",
+    "@codemirror/language": "^6.12.4",
+    "@codemirror/state": "^6.7.5",
+    "@codemirror/view": "^6.43.12",
+    "@lezer/highlight": "^1.2.3",
+    "@tauri-apps/api": "2.11.1",
+    "jsqr": "^1.4.0",
+    "qrcode": "^1.5.4",
+    "react": "19.3.0",
+    "react-dom": "19.3.0"
+  },
+  "devDependencies": {
+    "@tauri-apps/cli": "2.11.5",
+    "@types/qrcode": "^1.5.6",
+    "@types/react": "19.3.0",
+    "@types/react-dom": "19.3.0",
+    "@vitejs/plugin-react": "6.1.1",
+    "typescript": "7.0.2",
+    "vite": "8.3.0"
+  }
+}

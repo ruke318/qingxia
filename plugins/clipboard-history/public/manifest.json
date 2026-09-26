@@ -1,0 +1,10 @@
+{
+  "apiVersion": 1,
+  "id": "clipboard-history",
+  "name": "剪贴板",
+  "version": "0.1.0",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "permissions": ["clipboard.history"],
+  "commands": [{ "id": "open", "title": "剪贴板", "keywords": ["剪贴板", "粘贴", "clipboard", "clip"], "suggestedShortcut": "Alt+Shift+V" }]
+}

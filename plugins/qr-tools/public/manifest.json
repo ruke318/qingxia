@@ -1,0 +1,12 @@
+{
+  "apiVersion": 1,
+  "id": "qr-tools",
+  "name": "二维码",
+  "version": "0.1.0",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "permissions": ["clipboard.writeText"],
+  "commands": [
+    { "id": "open", "title": "二维码", "keywords": ["二维码", "qr", "qrcode", "生成二维码", "识别二维码", "扫码", "解码"] }
+  ]
+}

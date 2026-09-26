@@ -1,0 +1,8 @@
+node_modules/
+dist/
+dist-plugins/
+src-tauri/target/
+src-tauri/gen/
+src-tauri/resources/plugins/
+.DS_Store
+*.log

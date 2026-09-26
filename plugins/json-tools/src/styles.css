@@ -1,0 +1,57 @@
+:root { font-family: "SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif; color: #39424d; background: transparent; font-synthesis: none; text-rendering: optimizeLegibility; -webkit-font-smoothing: antialiased; }
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; }
+body { overflow: hidden; }
+button, input { font: inherit; }
+button { cursor: pointer; }
+button:disabled { cursor: default; opacity: .4; }
+button:focus-visible { outline: 2px solid #7896b8; outline-offset: 3px; }
+.json-plugin { height: 100%; display: flex; flex-direction: column; overflow: hidden; position: relative; border-radius: 0 0 18px 18px; background: transparent; }
+.icon-button { width: 30px; height: 30px; border: 0; border-radius: 8px; display: grid; place-items: center; background: transparent; color: #85909c; }
+.icon-button:hover { background: rgba(72, 91, 113, .07); color: #475d75; }
+svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.settings-button { flex: 0 0 24px; width: 24px; height: 24px; }
+.settings-button svg { width: 16px; height: 16px; }
+.settings-button svg circle { fill: #f9fafc; }
+.editor { flex: 1; min-height: 0; overflow: hidden; }
+.cm-editor { background: transparent; font-size: 14px; outline: none !important; }
+.cm-scroller { font-family: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace !important; line-height: 1.85; }
+.cm-content { padding: 19px 0 28px !important; caret-color: #617f9c; }
+.cm-line { padding: 0 25px 0 13px !important; }
+.cm-gutters { background: transparent !important; border: 0 !important; color: #b5bdc6 !important; font-size: 12px; }
+.cm-lineNumbers .cm-gutterElement { min-width: 52px; padding: 0 13px 0 15px !important; }
+.cm-activeLineGutter { background: transparent !important; color: #788b9f; }
+.cm-activeLine { background: rgba(97, 121, 149, .035) !important; }
+.cm-focused .cm-selectionBackground, .cm-selectionBackground, .cm-content ::selection { background: #dce6f1 !important; }
+.cm-placeholder { color: #a8b0ba !important; }
+.cm-cursor { border-left-color: #6487ad !important; }
+.cm-matchingBracket { background: #e0e8f2 !important; }
+.editor-status { flex: 0 0 30px; min-width: 0; display: flex; align-items: center; gap: 7px; padding: 0 24px; color: #929da8; font-size: 10px; }
+.status-dot { width: 4px; height: 4px; flex: 0 0 4px; border-radius: 50%; background: #9eafaa; }
+.status-message { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.line-count { margin-left: auto; padding-left: 15px; flex-shrink: 0; font-variant-numeric: tabular-nums; }
+.editor-status.invalid { color: #ad6866; }
+.invalid .status-dot { background: #c18480; }
+.copy-actions { flex: 0 0 74px; display: flex; gap: 10px; padding: 13px 22px 17px; border-top: 1px solid rgba(47, 66, 88, .07); background: rgba(243, 246, 249, .5); }
+.copy-actions button { flex: 1; min-width: 0; display: flex; align-items: center; justify-content: center; gap: 8px; border: 1px solid rgba(75, 94, 116, .13); border-radius: 9px; background: rgba(255, 255, 255, .82); box-shadow: 0 1px 2px rgba(32, 47, 65, .025); color: #657c93; font-size: 12px; transition: background 120ms, border-color 120ms; }
+.copy-actions button:hover:not(:disabled) { background: #fff; border-color: #b7c6d7; }
+.copy-actions button:active:not(:disabled) { background: #e9eff6; }
+.copy-actions button:first-child { color: #547898; background: #edf3f9; border-color: #d2e0ed; }
+.action-symbol { font-family: "SFMono-Regular", Menlo, monospace; font-size: 17px; line-height: 1; }
+.action-symbol.quoted { font-size: 14px; }
+.settings-scrim { position: absolute; inset: 0; display: flex; align-items: flex-end; justify-content: flex-end; padding: 18px 18px 104px; background: rgba(240, 244, 248, .16); z-index: 10; }
+.shortcut-panel { width: 320px; padding: 17px 20px 18px; border: 1px solid #e3e8ee; border-radius: 14px; background: #fbfcfe; box-shadow: 0 12px 50px rgba(40, 57, 79, .13); }
+.shortcut-heading { display: flex; align-items: center; justify-content: space-between; }
+.shortcut-heading h2 { font-size: 14px; margin: 0; font-weight: 600; }
+.shortcut-heading button { font-size: 22px; }
+.shortcut-panel p { margin: 7px 0 20px; font-size: 11px; color: #8c96a3; line-height: 1.7; }
+.shortcut-panel label { display: block; margin-bottom: 7px; font-size: 11px; color: #758495; }
+.shortcut-panel input { width: 100%; height: 40px; padding: 0 12px; border: 1px solid #dae3ee; border-radius: 8px; background: #f3f7fb; color: #536f8b; text-align: center; outline: none; font-size: 12px; }
+.shortcut-panel input:focus { border-color: #8daac7; box-shadow: 0 0 0 3px #e9f0f7; }
+.shortcut-panel input::placeholder { color: #9aaabd; }
+.shortcut-panel .shortcut-error { color: #b46767; margin: 10px 0 0; }
+.shortcut-actions { display: flex; justify-content: flex-end; gap: 10px; margin-top: 18px; }
+.shortcut-actions button { border: 0; border-radius: 7px; padding: 7px 14px; font-size: 12px; }
+.quiet-button { color: #8b97a5; background: transparent; }
+.save-button { color: #526f8d; background: #e7eef6; }
+@media (max-width: 520px) { .copy-actions { gap: 6px; padding-inline: 12px; } .copy-actions button { gap: 5px; font-size: 11px; } }

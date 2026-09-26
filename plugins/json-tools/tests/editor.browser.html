@@ -1,0 +1,144 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>JSON 插件回归检查</title></head>
+<body>
+  <script type="module">
+    // 本页扮演宿主：iframe 加载插件框架页，经消息协议 v1 应答插件请求并记录调用
+    import { mountPlugin, runScenarios, writeResult } from "../../../tests/plugin-host-mock.js";
+
+    const host = mountPlugin({
+      src: "./frame.html",
+      width: 685,
+      height: 610,
+      handlers: {
+        "view.ready": () => null,
+        "view.back": () => null,
+        "view.hide": () => null,
+        "storage.get": () => null,
+        "storage.set": () => null,
+        "shortcuts.get": () => null,
+        "shortcuts.set": () => null,
+        "clipboard.writeText": () => null,
+      },
+    });
+    const calls = host.calls;
+    const pause = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+    function assert(condition, message) { if (!condition) throw new Error(message); }
+    async function until(check, message) {
+      const deadline = Date.now() + 3000;
+      while (!check()) { if (Date.now() > deadline) throw new Error(message); await pause(10); }
+    }
+
+    // iframe 的窗口与文档；事件和 DataTransfer 用 iframe 自己的构造函数创建
+    let win, doc, content, editor;
+    const text = () => editor.state.doc.toString();
+    function editKey(key, shiftKey = false) {
+      editor.focus();
+      content.dispatchEvent(new win.KeyboardEvent("keydown", { key: shiftKey ? key.toUpperCase() : key, code: `Key${key.toUpperCase()}`, keyCode: key.toUpperCase().charCodeAt(0), metaKey: true, shiftKey, bubbles: true, cancelable: true }));
+      assert(!calls.some((call) => ["view.back", "view.hide"].includes(call.method)), "编辑快捷键不应退出插件");
+    }
+    function paste(value, selection = { anchor: 0, head: editor.state.doc.length }) {
+      editor.dispatch({ selection });
+      editor.focus();
+      const data = new win.DataTransfer();
+      data.setData("text/plain", value);
+      content.dispatchEvent(new win.ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
+    }
+
+    const compact = '{"id":9007199254740993123,"id":1e+400,"path":"C:\\\\Users\\\\test","text":"a\\nb"}';
+    let first, normalized;
+
+    async function setup() {
+      ({ win, doc } = await host.ready);
+      await until(() => doc.querySelector(".cm-content") && win.__qingboxTestEditorView, "编辑器未挂载");
+      content = doc.querySelector(".cm-content");
+      // 必须用 iframe 内的 EditorView：顶层页面另行导入会得到另一份模块实例
+      const EditorView = win.__qingboxTestEditorView;
+      editor = EditorView.findFromDOM(content);
+      assert(editor instanceof EditorView, "未取得 iframe 内编辑器实例");
+      // 原先伪造的 invoke 在挂载时同步记账并立即应答；改走端口后请求与应答都是异步的，
+      // 先等握手后首批请求（就绪通知、草稿读取）应答完毕，保证粘贴前插件状态与原先一致
+      await until(() => ["view.ready", "storage.get"].every((method) => calls.some((call) => call.method === method)) && host.pending === 0, "插件握手后未发出首批请求");
+      await pause();
+    }
+
+    const scenarios = [
+      ["完整粘贴自动格式化且保留大整数、指数和重复键", async () => {
+        paste(compact);
+        await until(() => text().includes('\n  "id": 9007199254740993123'), "整段粘贴未无损格式化");
+        assert(calls.some((call) => call.method === "view.ready"), "插件未通知宿主已就绪");
+        assert(doc.querySelectorAll(".cm-lineNumbers .cm-gutterElement").length > 1, "缺少编辑器行号");
+        first = text();
+      }],
+      ["完整转义粘贴保留内部转义，一次撤销与重做准确", async () => {
+        paste(JSON.stringify('{"name":"中文","text":"a\\nb"}'));
+        await until(() => text().includes('"name": "中文"'), "完整转义 JSON 未自动解包");
+        normalized = text();
+        editKey("z");
+        await until(() => text() === first, "一次撤销未恢复前一份文档");
+        editKey("z", true);
+        await until(() => text() === normalized, "重做未恢复规范化文档");
+      }],
+      ["编辑组合键到达页面后，不触发返回或隐藏插件", async () => {
+        for (const key of ["a", "c", "x", "v"]) editKey(key);
+      }],
+      ["局部选区粘贴仅替换选区内容", async () => {
+        paste('{"a":1}');
+        await until(() => text().includes('"a": 1'), "部分粘贴准备失败");
+        const beforePartial = text();
+        const position = beforePartial.indexOf("1");
+        paste("200", { anchor: position, head: position + 1 });
+        await until(() => text().includes('"a": 200'), "部分粘贴没有插入选区");
+        assert(text() === beforePartial.replace("1", "200"), "部分粘贴错误地规范化整份文档");
+      }],
+      ["无效粘贴只按括号排版不改内容，并显示准确行列", async () => {
+        paste('{"name":1,bad:2}');
+        await until(() => doc.querySelector(".editor-status")?.textContent.includes("第 3 行，第 3 列"), "无效 JSON 未报告排版后的行列");
+        assert(text() === '{\n  "name": 1,\n  bad: 2\n}', "无效粘贴未按括号排版或修改了内容");
+        paste("普通文本, 不是 JSON");
+        await until(() => text() === "普通文本, 不是 JSON", "非对象或数组的无效文本被改动");
+      }],
+      ["XML 粘贴自动格式化并切换高亮，复制按钮按 XML 输出", async () => {
+        const xml = '<order id="1"><item>苹果</item></order>';
+        const formatted = '<order id="1">\n  <item>苹果</item>\n</order>';
+        paste(xml);
+        await until(() => text() === formatted, "XML 未自动格式化");
+        await until(() => doc.querySelector(".editor-status")?.textContent.includes("XML 内容"), "状态栏未显示 XML");
+        await until(() => [...doc.querySelectorAll(".cm-content span")].some((span) => span.textContent === "item" && win.getComputedStyle(span).color === "rgb(82, 110, 153)"), "XML 标签名未按 XML 语法高亮");
+        const buttons = [...doc.querySelectorAll(".copy-actions button")];
+        for (let index = 0; index < buttons.length; index += 1) {
+          const before = calls.filter((call) => call.method === "clipboard.writeText").length;
+          buttons[index].click();
+          await until(() => calls.filter((call) => call.method === "clipboard.writeText").length > before, "复制按钮没有调用插件剪贴板能力");
+          const copied = calls.filter((call) => call.method === "clipboard.writeText").at(-1).params.text;
+          assert(copied === [formatted, xml, JSON.stringify(xml)][index], "XML 复制模式输出不正确");
+          await until(() => !buttons[index].disabled, "复制完成后按钮仍禁用");
+        }
+      }],
+      ["三个复制按钮输出格式化、压缩和含外层引号的压缩转义文本", async () => {
+        paste(compact);
+        await until(() => text() === first, "复制验证准备失败");
+        const buttons = [...doc.querySelectorAll(".copy-actions button")];
+        for (let index = 0; index < buttons.length; index += 1) {
+          const before = calls.filter((call) => call.method === "clipboard.writeText").length;
+          buttons[index].click();
+          await until(() => calls.filter((call) => call.method === "clipboard.writeText").length > before, "复制按钮没有调用插件剪贴板能力");
+          const copied = calls.filter((call) => call.method === "clipboard.writeText").at(-1).params.text;
+          assert(copied === [first, compact, JSON.stringify(compact)][index], "复制模式输出不正确");
+          await until(() => !buttons[index].disabled, "复制完成后按钮仍禁用");
+        }
+      }],
+      ["长文档仅编辑区滚动，底部三个按钮固定可见", async () => {
+        const footer = doc.querySelector(".copy-actions").getBoundingClientRect();
+        paste(JSON.stringify(Array.from({ length: 150 }, (_, index) => ({ index, name: "较长的 JSON 内容" }))));
+        await until(() => editor.scrollDOM.scrollHeight > editor.scrollDOM.clientHeight, "长文档未在编辑区内滚动");
+        editor.scrollDOM.scrollTop = editor.scrollDOM.scrollHeight;
+        const currentFooter = doc.querySelector(".copy-actions").getBoundingClientRect();
+        assert(Math.abs(footer.top - currentFooter.top) < 1 && currentFooter.bottom <= win.innerHeight, "编辑区滚动改变了固定底部按钮位置");
+      }],
+    ];
+
+    runScenarios(host, setup, scenarios).then(writeResult);
+  </script>
+</body>
+</html>

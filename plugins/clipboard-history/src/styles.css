@@ -1,0 +1,57 @@
+:root { font-family: "SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif; color: #242b31; background: transparent; font-synthesis: none; -webkit-font-smoothing: antialiased; }
+* { box-sizing: border-box; }
+html, body, #root { width: 100%; height: 100%; margin: 0; }
+body { overflow: hidden; }
+button, input { font: inherit; }
+button { cursor: pointer; color: inherit; }
+button:disabled { cursor: default; }
+button:focus-visible { outline: 2px solid #4d8794; outline-offset: -2px; }
+svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.clipboard-plugin { position: relative; display: flex; flex-direction: column; height: 100%; overflow: hidden; border-radius: 0 0 18px 18px; background: transparent; }
+.clipboard-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 10px; min-height: 56px; padding: 10px 16px; border-bottom: 1px solid rgba(42,49,59,.08); }
+.category-tabs { display: flex; gap: 4px; }
+.category-tabs button { display: flex; align-items: center; gap: 6px; padding: 7px 10px; border: 0; border-radius: 8px; background: transparent; color: #626e75; font-size: 12px; }
+.category-tabs button[aria-selected="true"] { background: #e1eeeb; color: #244f59; font-weight: 600; }
+.category-tabs small { font-size: 10px; font-variant-numeric: tabular-nums; opacity: .8; }
+.shortcut-trigger { display: flex; align-items: center; gap: 8px; border: 0; border-radius: 7px; padding: 6px; background: transparent; color: #5f6e75; font-size: 11px; white-space: nowrap; }
+.shortcut-trigger:hover { background: #eaf0ed; }
+.shortcut-trigger svg { width: 16px; height: 16px; }
+.records { flex: 1; min-height: 0; overflow: auto; padding: 12px 14px; display: flex; flex-direction: column; gap: 8px; }
+.record { display: block; width: 100%; flex-shrink: 0; border: 1px solid rgba(42,49,59,.08); border-radius: 10px; padding: 13px 15px 10px; text-align: left; background: rgba(255,255,255,.55); transition: background 100ms, border-color 100ms; }
+.record:hover { background: rgba(255,255,255,.78); border-color: #bfd3ca; }
+.record.selected { border-color: #7daaa1; background: #eaf3f0; }
+.text-preview { margin: 0; font-family: inherit; font-size: 13px; line-height: 1.65; white-space: pre-wrap; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 4; overflow: hidden; }
+.record-meta { display: flex; align-items: center; gap: 10px; margin-top: 11px; font-size: 10px; line-height: 1.4; color: #66727a; font-variant-numeric: tabular-nums; }
+.record-detail { margin-left: auto; white-space: nowrap; }
+.record.copied .record-detail { color: #246453; font-weight: 600; }
+.image-records { display: grid; grid-template-columns: repeat(2, minmax(0, 1fr)); align-content: start; gap: 12px; }
+.image-records .record { min-width: 0; padding: 8px 8px 11px; }
+.image-preview { height: 160px; display: flex; align-items: center; justify-content: center; border-radius: 6px; overflow: hidden; background: repeating-conic-gradient(#e9eeeb 0% 25%, #f6f8f7 0% 50%) 50% / 16px 16px; }
+.image-preview img { max-width: 100%; max-height: 100%; object-fit: contain; }
+.image-records .record-meta { padding-inline: 3px; gap: 6px; }
+.file-preview { display: flex; align-items: flex-start; gap: 12px; min-width: 0; }
+.file-icon { flex-shrink: 0; display: grid; place-items: center; width: 38px; height: 42px; color: #3d7792; background: #eaf2f6; border-radius: 8px; }
+.file-icon svg { width: 23px; height: 23px; }
+.file-preview > div { min-width: 0; }
+.file-preview strong { display: block; font-size: 13px; font-weight: 550; overflow: hidden; white-space: nowrap; text-overflow: ellipsis; }
+.file-preview p { margin: 6px 0 0; font-size: 11px; line-height: 1.6; color: #66727a; white-space: pre-line; overflow-wrap: anywhere; display: -webkit-box; -webkit-box-orient: vertical; -webkit-line-clamp: 2; overflow: hidden; }
+.empty-state { flex: 1; grid-column: 1 / -1; min-height: 360px; display: flex; flex-direction: column; align-items: center; justify-content: center; text-align: center; color: #69757b; }
+.empty-state > svg { width: 34px; height: 34px; stroke-width: 1.1; color: #74928b; margin-bottom: 18px; }
+.empty-state strong { color: #36494c; font-size: 14px; font-weight: 500; }
+.empty-state p { font-size: 11px; margin: 10px 12px; line-height: 1.7; }
+.clipboard-footer { display: flex; align-items: center; justify-content: space-between; gap: 12px; min-height: 35px; padding: 8px 16px; border-top: 1px solid rgba(42,49,59,.08); color: #626e75; background: rgba(42,49,59,.035); font-size: 10px; line-height: 1.6; }
+.clipboard-footer > span:first-child { overflow-wrap: anywhere; max-height: 48px; overflow: auto; }
+.clipboard-footer.error > span:first-child { color: #ab3939; }
+.history-limit { flex-shrink: 0; }
+.shortcut-scrim { position: absolute; inset: 0; display: flex; align-items: flex-start; justify-content: flex-end; padding: 52px 16px 16px; background: #e6eeea55; }
+.shortcut-panel { width: 290px; padding: 16px 18px; border: 1px solid #d8e4de; border-radius: 12px; background: #fbfdfc; box-shadow: 0 12px 40px #284a3220; }
+.shortcut-heading { display: flex; justify-content: space-between; align-items: center; }
+.shortcut-heading h2 { margin: 0; font-size: 13px; font-weight: 600; }
+.shortcut-heading button { width: 26px; height: 26px; border: 0; background: transparent; font-size: 20px; color: #626e75; }
+.shortcut-panel p { font-size: 11px; color: #626e75; margin: 8px 0 16px; }
+.shortcut-panel input { width: 100%; height: 38px; border: 1px solid #c6d8d0; border-radius: 7px; background: #f0f6f3; color: #34484e; text-align: center; outline: none; font-size: 12px; }
+.shortcut-actions { display: flex; justify-content: flex-end; gap: 8px; margin-top: 14px; }
+.text-button, .save-button { border: 0; border-radius: 6px; padding: 8px 12px; font-size: 11px; background: transparent; color: #5d6e73; }
+.save-button { background: #e1eeeb; color: #285b62; }
+.shortcut-actions button:disabled { opacity: .5; }
+@media (max-width: 550px) { .clipboard-toolbar { padding-inline: 10px; } .category-tabs button { padding-inline: 7px; } .shortcut-trigger { gap: 4px; } .history-limit { display: none; } .image-preview { height: 130px; } .image-records .record-meta { flex-wrap: wrap; } }

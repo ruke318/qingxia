@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-begin-search-session"
+description = "Enables the begin_search_session command without any pre-configured scope."
+commands.allow = ["begin_search_session"]
+
+[[permission]]
+identifier = "deny-begin-search-session"
+description = "Denies the begin_search_session command without any pre-configured scope."
+commands.deny = ["begin_search_session"]

@@ -1,0 +1,11 @@
+{
+  "id": "minimal-note",
+  "name": "最小示例：便笺",
+  "version": "0.1.0",
+  "apiVersion": 1,
+  "entry": "index.html",
+  "commands": [
+    { "id": "open", "title": "示例便笺", "keywords": ["便笺", "示例", "note"] }
+  ],
+  "permissions": []
+}

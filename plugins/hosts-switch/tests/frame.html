@@ -1,0 +1,10 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>Hosts 插件框架页</title></head>
+<body style="margin:0;background:#dce5df"><div id="root" style="width:685px;height:610px;margin:24px auto"></div>
+<script type="module">
+  // 由回归测试页以 iframe 加载：只运行插件入口，宿主由外层测试页模拟
+  import "../src/main.tsx";
+  // 仅供外层测试取得 iframe 内与插件同一份 CodeMirror 模块实例，不影响插件行为
+  import { EditorView } from "@codemirror/view";
+  window.__qingboxTestEditorView = EditorView;
+</script></body></html>

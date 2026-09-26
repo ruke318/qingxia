@@ -1,0 +1,213 @@
+<!doctype html>
+<html lang="zh-CN"><head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>Hosts 插件回归检查</title></head>
+<body style="margin:0;background:#dce5df">
+<script type="module">
+  // 本页扮演宿主：iframe 加载插件框架页，经消息协议 v1 应答插件请求并记录调用
+  import { HostError, mountPlugin, runScenarios, writeResult } from "../../../tests/plugin-host-mock.js";
+  const original = "# 系统原有内容\n127.0.0.1 localhost\n::1 localhost\n";
+  let groups = [
+    { id: "dev", name: "开发环境", content: "# 本地服务\n127.0.0.1 api.dev.test\n127.0.0.1 admin.dev.test", enabled: false },
+    { id: "test", name: "测试环境", content: "10.0.0.25 api.test.test", enabled: false },
+  ];
+  let revision = 1, failNext = false, holdNext = false, releaseSave;
+  const state = () => ({ groups: structuredClone(groups), version: String(revision), systemHosts: original + groups.filter((item) => item.enabled).map((item) => `# ${item.name}\n${item.content}\n`).join(""), synced: true, notice: "已应用，原 hosts 已自动备份" });
+  // 框架页内 #root 固定 685×610 且上下左右留 24px，iframe 按此留足空间
+  const host = mountPlugin({
+    src: "./frame.html",
+    width: 733,
+    height: 658,
+    handlers: {
+      "hosts.get": () => state(),
+      "hosts.save": async (params) => {
+        if (failNext) { failNext = false; throw new HostError("cancelled", "已取消系统授权，分组启用状态未改变"); }
+        if (params.version !== String(revision)) throw new HostError("invalid_params", "系统 hosts 已发生变化，请刷新");
+        if (holdNext) { holdNext = false; await new Promise((resolve) => { releaseSave = resolve; }); }
+        groups = structuredClone(params.groups); revision += 1; return state();
+      },
+      "shortcuts.get": () => "",
+      "shortcuts.set": () => null,
+      "view.ready": () => null,
+      "view.back": () => null,
+      "view.hide": () => null,
+      "view.drag": () => null,
+    },
+  });
+  const calls = host.calls;
+  const pause = () => new Promise((resolve) => setTimeout(resolve, 15));
+  async function until(test, label) { const end = Date.now() + 3000; while (!test()) { if (Date.now() > end) throw new Error(label); await pause(); } }
+  const assert = (test, label) => { if (!test) throw new Error(label); };
+  // 有意遮蔽全局 document：以下场景中的 document 均指 iframe 内插件文档，便于逐条保留原断言。
+  // EditorView 取自 iframe 内与插件同一份模块实例，事件用 iframe 自己的构造函数创建。
+  let win, document, EditorView;
+  function input(selector, value) {
+    const element = document.querySelector(selector);
+    const editor = EditorView.findFromDOM(element);
+    if (editor) { editor.dispatch({ changes: { from: 0, to: editor.state.doc.length, insert: value }, userEvent: "input" }); return; }
+    Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value").set.call(element, value);
+    element.dispatchEvent(new win.InputEvent("input", { bubbles: true, inputType: "insertText" }));
+  }
+  const editorValue = (element) => EditorView.findFromDOM(element).state.doc.toString();
+  const button = (text) => [...document.querySelectorAll('button')].find((item) => item.textContent === text);
+  const toggle = (name) => document.querySelector(`[role="switch"][aria-label="启用${name}"]`);
+  const saveButton = () => document.querySelector('[aria-label="保存当前分组"]');
+  const saveKey = (options = {}) => {
+    const event = new win.KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true, cancelable: true, ...options });
+    document.querySelector('[aria-label="分组 hosts 内容"]').dispatchEvent(event);
+    return event;
+  };
+  const saveCount = () => calls.filter((call) => call.method === "hosts.save").length;
+
+  async function setup() {
+    ({ win, doc: document } = await host.ready);
+    await until(() => toggle("开发环境") && !toggle("开发环境").disabled && win.__qingboxTestEditorView, "插件初始化失败");
+    EditorView = win.__qingboxTestEditorView;
+    const view = EditorView.findFromDOM(document.querySelector('[aria-label="分组 hosts 内容"]'));
+    assert(view instanceof EditorView, "未取得 iframe 内编辑器实例");
+  }
+
+  const scenarios = [
+    ["IP、多个域名及中文注释实时区分，IPv6 高亮、原文和撤销均正常", async () => {
+      const content = document.querySelector('[aria-label="分组 hosts 内容"]');
+      const initialContent = editorValue(content);
+      const highlighted = "# 中文注释 192.168.0.1 example.test\n  192.168.0.2\tfirst.test second.test # 行尾注释\n::1 ipv6.test\n";
+      input('[aria-label="分组 hosts 内容"]', highlighted);
+      await until(() => document.querySelectorAll('.hosts-ip').length === 2, "IP 高亮未更新");
+      assert(editorValue(content) === highlighted, "高亮改变了原文、缩进或换行");
+      assert([...document.querySelectorAll('.hosts-ip')].map((node) => node.textContent).join(",") === "192.168.0.2,::1", "IPv4、IPv6 或注释中的 IP 分类错误");
+      const domains = [...document.querySelectorAll('.hosts-domain')].map((node) => node.textContent).join(" ");
+      assert(domains.includes("first.test") && domains.includes("second.test") && domains.includes("ipv6.test"), "一行多个域名未正确高亮");
+      assert(document.querySelector('.hosts-comment').textContent.includes("中文注释 192.168.0.1 example.test"), "注释应整体高亮");
+      content.focus();
+      content.dispatchEvent(new win.KeyboardEvent("keydown", { key: "z", code: "KeyZ", metaKey: true, bubbles: true, cancelable: true }));
+      await until(() => editorValue(content) === initialContent, "编辑器撤销没有还原原文");
+      content.dispatchEvent(new win.KeyboardEvent("keydown", { key: "Z", code: "KeyZ", keyCode: 90, metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+      await until(() => editorValue(content) === highlighted, "编辑器重做没有恢复修改");
+      content.dispatchEvent(new win.KeyboardEvent("keydown", { key: "z", code: "KeyZ", metaKey: true, bubbles: true, cancelable: true }));
+      await until(() => editorValue(content) === initialContent, "再次撤销没有还原原文");
+      for (const key of ["a", "c", "x", "v"]) {
+        content.dispatchEvent(new win.KeyboardEvent("keydown", { key, code: `Key${key.toUpperCase()}`, metaKey: true, bubbles: true, cancelable: true }));
+      }
+      assert(!calls.some((call) => ["view.back", "view.hide"].includes(call.method)), "编辑快捷键不应退出插件");
+    }],
+    ["多个分组独立启用，不互斥", async () => {
+      toggle("开发环境").click();
+      await until(() => toggle("开发环境").getAttribute("aria-checked") === "true", "第一组未启用");
+      toggle("测试环境").click();
+      await until(() => toggle("测试环境").getAttribute("aria-checked") === "true", "第二组未启用");
+      assert(toggle("开发环境").getAttribute("aria-checked") === "true", "第二组启用时错误关闭第一组");
+    }],
+    ["只读系统视图同时展示原有内容及多个启用分组", async () => {
+      document.querySelector('.system-link').click();
+      await until(() => document.querySelector('.system-editor .cm-content'), "未打开系统视图");
+      const system = document.querySelector('.system-editor .cm-content');
+      assert(system.getAttribute("aria-readonly") === "true" && !system.isContentEditable, "完整系统 hosts 不可编辑");
+      assert(editorValue(system).includes("localhost") && editorValue(system).includes("api.dev.test") && editorValue(system).includes("api.test.test"), "完整系统视图缺少原始内容或启用分组");
+    }],
+    ["启用分组可以编辑，系统菜单只读，保存和删除集中在右上方", async () => {
+      document.querySelector('.group-name:not(.system-link)').click();
+      await until(() => document.querySelector('[aria-label="分组名称"]'), "未返回分组");
+      assert(!document.querySelector('[aria-label="分组名称"]').readOnly && document.querySelector('[aria-label="分组 hosts 内容"]').isContentEditable, "已启用分组应允许编辑");
+      assert(!document.querySelector('.toolbar') && !document.querySelector('.editor-actions'), "不应恢复顶部横条和底部保存操作条");
+      assert(!document.querySelector('.system-link').closest('li').querySelector('[role="switch"]'), "系统 hosts 菜单不能有开关");
+      assert(document.querySelector('.state-label').nextElementSibling.getAttribute('aria-label') === '删除当前分组', "删除按钮必须位于状态右侧");
+      assert(document.querySelector('.editor-heading [aria-label="保存当前分组"]'), "保存按钮应在编辑区右上方");
+    }],
+    ["编辑不自动提交，按钮保存已启用分组并更新系统内容", async () => {
+      const beforeEditing = saveCount();
+      input('[aria-label="分组名称"]', "本地开发");
+      input('[aria-label="分组 hosts 内容"]', "127.0.0.2 new.dev.test");
+      await new Promise((resolve) => setTimeout(resolve, 750));
+      assert(saveCount() === beforeEditing && !saveButton().disabled && document.querySelector('.group-row.selected small').textContent === "未保存", "编辑不得自动提交，应提示未保存");
+      saveButton().click();
+      await until(() => toggle("本地开发") && !toggle("本地开发").disabled, "按钮没有保存启用分组");
+      assert(groups[0].enabled && state().systemHosts.includes("new.dev.test"), "启用分组保存后没有应用最新内容");
+    }],
+    ["取消授权保留旧配置及草稿，⌘S 可重试保存并应用", async () => {
+      input('[aria-label="分组 hosts 内容"]', "127.0.0.3 latest.dev.test");
+      await pause();
+      failNext = true;
+      saveButton().click();
+      await until(() => document.querySelector('[role="alert"]') && !saveButton().disabled, "授权取消未提示或不能重试");
+      assert(groups[0].content.includes("new.dev.test") && groups[0].enabled, "授权取消改变已保存内容或启用状态");
+      assert(editorValue(document.querySelector('[aria-label="分组 hosts 内容"]')).includes("latest.dev.test"), "授权取消丢失待保存内容");
+      assert(saveKey().defaultPrevented, "⌘S 没有阻止系统默认保存行为");
+      await until(() => groups[0].content.includes("latest.dev.test") && saveButton().disabled && !toggle("本地开发").disabled, "⌘S 未保存最新内容");
+      assert(state().systemHosts.includes("latest.dev.test"), "⌘S 保存后系统内容未更新");
+    }],
+    ["关闭分组可保存未完成内容，其他启用分组继续生效", async () => {
+      toggle("本地开发").click();
+      await until(() => toggle("本地开发").getAttribute("aria-checked") === "false", "关闭分组失败");
+      assert(groups[1].enabled, "关闭一组不能关闭其他组");
+      const disabledSystem = state().systemHosts;
+      input('[aria-label="分组 hosts 内容"]', "尚未输入完成");
+      await pause();
+      saveKey({ metaKey: false, ctrlKey: true });
+      await until(() => groups[0].content === "尚未输入完成" && saveButton().disabled && !toggle("本地开发").disabled, "Ctrl+S 未保存关闭分组");
+      assert(state().systemHosts === disabledSystem, "关闭分组保存时不能改变系统内容");
+    }],
+    ["保存期间继续输入不丢内容，重复快捷键不重复提交，无修改不保存", async () => {
+      holdNext = true;
+      const editor = document.querySelector('[aria-label="分组 hosts 内容"]');
+      editor.focus();
+      input('[aria-label="分组 hosts 内容"]', "127.0.0.4 saved.dev.test");
+      await pause();
+      saveKey();
+      await until(() => releaseSave, "没有触发保存");
+      const duringSave = saveCount();
+      saveKey();
+      assert(saveCount() === duringSave, "连续按 ⌘S 不应重复提交保存中的请求");
+      assert(editor.isContentEditable && document.activeElement === editor, "保存不应打断继续输入");
+      input('[aria-label="分组 hosts 内容"]', "127.0.0.5 newer.dev.test");
+      await pause();
+      releaseSave();
+      await until(() => !toggle("本地开发").disabled, "保存没有结束");
+      assert(groups[0].content.includes("saved.dev.test") && editorValue(editor).includes("newer.dev.test") && !saveButton().disabled, "迟到响应覆盖新输入或错误清除未保存状态");
+      saveKey();
+      await until(() => groups[0].content.includes("newer.dev.test") && saveButton().disabled, "后续 ⌘S 未保存新输入");
+      const cleanCount = saveCount();
+      saveKey();
+      await pause();
+      assert(saveCount() === cleanCount, "无修改时不应再次保存");
+    }],
+    ["开关立即提交当前分组，其他分组的未保存修改保留且不被顺带应用", async () => {
+      document.querySelectorAll('.group-name:not(.system-link)')[1].click();
+      await pause();
+      input('[aria-label="分组 hosts 内容"]', "10.0.0.26 unsaved.test.test");
+      await pause();
+      document.querySelector('.group-name:not(.system-link)').click();
+      await pause();
+      input('[aria-label="分组 hosts 内容"]', "127.0.0.6 toggled.dev.test");
+      await pause();
+      toggle("本地开发").click();
+      await until(() => groups[0].enabled && toggle("本地开发").getAttribute("aria-checked") === "true" && !toggle("本地开发").disabled, "开关未保存并启用当前分组");
+      assert(groups[0].content.includes("toggled.dev.test") && groups[1].content === "10.0.0.25 api.test.test", "开关应仅提交当前分组草稿");
+      document.querySelectorAll('.group-name:not(.system-link)')[1].click();
+      await pause();
+      assert(editorValue(document.querySelector('[aria-label="分组 hosts 内容"]')).includes("unsaved.test.test") && !saveButton().disabled, "其他分组未保存草稿丢失");
+    }],
+    ["新建默认关闭，删除可取消并正确保存", async () => {
+      document.querySelector('[aria-label="新建分组"]').click();
+      await until(() => groups.length === 3 && document.querySelector('[aria-label="分组名称"]').value === "新分组 3", "新建分组未选中");
+      assert(!groups[2].enabled, "新建分组不应自动启用");
+      document.querySelector('[aria-label="删除当前分组"]').click();
+      await until(() => button("删除分组"), "删除未二次确认");
+      button("取消").click();
+      await until(() => !document.querySelector('.delete-confirm'), "取消删除未恢复");
+      assert(groups.length === 3, "取消删除不应丢失分组");
+      document.querySelector('[aria-label="删除当前分组"]').click();
+      await until(() => button("删除分组"), "再次删除未确认");
+      button("删除分组").click();
+      await until(() => groups.length === 2 && !document.querySelector('.delete-confirm'), "删除分组失败");
+    }],
+    ["重新读取系统实际内容，布局保持 610px", async () => {
+      document.querySelector('[aria-label="刷新系统 hosts"]').click();
+      await until(() => document.querySelector('[role="status"]')?.textContent.includes("最新系统"), "刷新没有完成");
+      assert(document.getElementById('root').scrollHeight === 610, "内容超出固定 610px 区域");
+    }],
+  ];
+
+  // 带 ?preview 时只挂载插件供人工查看，不执行场景
+  if (!new URLSearchParams(location.search).has("preview")) {
+    runScenarios(host, setup, scenarios).then((result) => writeResult({ ...result, saveCount: saveCount() }));
+  }
+</script></body></html>

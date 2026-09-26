@@ -1,0 +1,10 @@
+{
+  "apiVersion": 1,
+  "id": "hosts-switch",
+  "name": "Hosts 切换",
+  "version": "0.1.0",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "permissions": ["hosts.read", "hosts.write"],
+  "commands": [{ "id": "open", "title": "Hosts 切换", "keywords": ["host", "hosts", "主机", "域名", "分组"] }]
+}

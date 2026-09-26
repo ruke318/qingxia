@@ -1,0 +1,49 @@
+.plugin-manager {
+  margin-top: 16px;
+  padding-top: 16px;
+  border-top: 1px solid rgba(42, 49, 59, 0.10);
+}
+
+.plugin-manager-heading,
+.plugin-manager-tools,
+.plugin-manager-row {
+  display: flex;
+  align-items: center;
+}
+
+.plugin-manager-heading { justify-content: space-between; gap: 12px; margin-bottom: 12px; }
+.plugin-manager-heading h2 { margin: 0; font-size: 14px; font-weight: 580; }
+.plugin-manager-tools { gap: 5px; }
+.plugin-manager button { flex-shrink: 0; border: 0; color: inherit; }
+.plugin-manager button:disabled { cursor: default; opacity: 0.45; }
+.plugin-manager button:focus-visible { outline: 2px solid rgba(49, 95, 72, 0.65); outline-offset: 3px; }
+.plugin-manager-reload { display: grid; place-items: center; width: 28px; height: 28px; padding: 6px; border-radius: 7px; background: transparent; }
+.plugin-manager-reload svg { width: 16px; height: 16px; stroke: currentColor; stroke-width: 1.5; stroke-linecap: round; stroke-linejoin: round; }
+.plugin-manager-import { padding: 6px 9px; border-radius: 7px; background: rgba(42, 49, 59, 0.06); font-size: 11px; }
+.plugin-manager-reload:hover:not(:disabled),
+.plugin-manager-import:hover:not(:disabled) { background: rgba(42, 49, 59, 0.10); }
+.plugin-manager-list { list-style: none; margin: 0; padding: 0; }
+.plugin-manager-item { padding: 12px 0; border-bottom: 1px solid rgba(42, 49, 59, 0.07); }
+.plugin-manager-item:last-child { border-bottom: 0; }
+.plugin-manager-row { gap: 12px; }
+.plugin-manager-info { display: flex; flex: 1; min-width: 0; flex-direction: column; gap: 4px; }
+.plugin-manager-info strong { overflow: hidden; text-overflow: ellipsis; white-space: nowrap; font-size: 13px; font-weight: 560; }
+.plugin-manager-info > span { color: rgba(42, 49, 59, 0.56); font-size: 11px; }
+.plugin-manager-open { padding: 5px 9px; border-radius: 7px; background: rgba(255, 255, 255, 0.38); font-size: 11px; }
+.plugin-manager-open:hover:not(:disabled) { background: rgba(255, 255, 255, 0.65); }
+.plugin-manager .plugin-manager-remove { padding: 5px 9px; border-radius: 7px; color: #b42332; background: rgba(180, 35, 50, 0.08); font-size: 11px; }
+.plugin-manager .plugin-manager-remove:hover:not(:disabled) { background: rgba(180, 35, 50, 0.15); }
+.plugin-manager-confirm { display: flex; align-items: center; gap: 8px; padding: 10px; margin-top: 10px; border-radius: 8px; background: rgba(180, 35, 50, 0.04); font-size: 11px; line-height: 1.6; }
+.plugin-manager-confirm > span { flex: 1; min-width: 0; }
+.plugin-manager-switch { width: 30px; height: 18px; padding: 2px; border-radius: 9px; background: rgba(42, 49, 59, 0.22); }
+.plugin-manager-switch[aria-checked="true"] { background: #56866a; }
+.plugin-manager-switch > span { display: block; width: 14px; height: 14px; border-radius: 50%; background: #fff; box-shadow: 0 1px 2px rgba(20, 30, 25, 0.16); }
+.plugin-manager-switch[aria-checked="true"] > span { transform: translateX(12px); }
+.plugin-manager-hint,
+.plugin-manager-status,
+.plugin-manager-empty { margin: 10px 0 0; color: rgba(42, 49, 59, 0.56); font-size: 11px; line-height: 1.6; }
+.plugin-manager-status { margin-bottom: 5px; }
+.plugin-manager-empty { padding: 18px 0; }
+.plugin-manager-error,
+.plugin-manager-item-error { margin: 8px 0 0; color: #a62d36; font-size: 11px; line-height: 1.6; overflow-wrap: anywhere; }
+.plugin-manager-error { padding: 8px 10px; border-radius: 7px; background: rgba(166, 45, 54, 0.06); }

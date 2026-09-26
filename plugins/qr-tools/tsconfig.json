@@ -1,0 +1,4 @@
+{
+  "extends": "../../tsconfig.json",
+  "include": ["src", "../../packages/plugin-sdk/src", "../../vite.qr.config.ts"]
+}
