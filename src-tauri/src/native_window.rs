@@ -1,9 +1,9 @@
 use std::{cell::{Cell, RefCell}, ptr::NonNull, time::{Duration, Instant}};
 use block2::RcBlock;
-use objc2::{MainThreadMarker, MainThreadOnly, rc::Retained, runtime::{AnyClass, ProtocolObject}};
+use objc2::{MainThreadMarker, MainThreadOnly, Message, rc::Retained, runtime::{AnyClass, ProtocolObject, Sel}, sel};
 use objc2_app_kit::{
     NSApplication, NSApplicationDidBecomeActiveNotification, NSApplicationDidResignActiveNotification,
-    NSBox, NSBoxType, NSColor, NSEvent, NSGlassEffectView, NSGlassEffectViewStyle, NSPanel, NSScreen,
+    NSBox, NSBoxType, NSColor, NSEvent, NSEventMask, NSEventModifierFlags, NSGlassEffectView, NSGlassEffectViewStyle, NSPanel, NSScreen,
     NSScreenSaverWindowLevel, NSTitlePosition, NSView,
     NSVisualEffectBlendingMode, NSVisualEffectState, NSVisualEffectView,
     NSWindowCollectionBehavior, NSWindowOrderingMode, NSWindowStyleMask,
@@ -98,6 +98,7 @@ pub fn prepare(window: &WebviewWindow) -> Result<(), String> {
     }
     configure_material(&content, main_thread);
     observe_activation(window);
+    install_edit_monitor(panel.as_panel().retain());
     Ok(())
 }
 
@@ -203,17 +204,51 @@ fn settle_later(window: &Window) {
     });
 }
 
-/// 唤起时激活应用，使系统“编辑”菜单的快捷键生效；应用此前被隐藏时先取消隐藏。
-fn activate_application(native: &NSPanel, main_thread: MainThreadMarker) {
+/// 在当前空间显示面板并取得键盘焦点，不激活应用。
+/// 激活应用由系统异步完成，可能顺带切换到应用上次所在的桌面空间（全屏应用上尤甚），
+/// 因此与系统聚焦搜索一样保持非激活：面板照常接收键盘，编辑快捷键由 install_edit_monitor 处理。
+fn bring_to_front(native: &NSPanel, main_thread: MainThreadMarker) {
     PRESENTED_AT.set(Some(Instant::now()));
-    let application = NSApplication::sharedApplication(main_thread);
-    ACTIVATION_PENDING.set(!application.isActive());
-    application.unhideWithoutActivation();
-    // 先在当前空间显示面板，再激活编辑菜单，避免沿用应用上次激活所在的桌面空间。
+    ACTIVATION_PENDING.set(false);
+    NSApplication::sharedApplication(main_thread).unhideWithoutActivation();
     native.orderFrontRegardless();
     native.makeKeyAndOrderFront(None);
-    #[allow(deprecated)]
-    application.activateIgnoringOtherApps(true);
+}
+
+/// 应用不激活时系统“编辑”菜单不响应快捷键。面板为键盘焦点时截获单独的 ⌘X/C/V/A，
+/// 把剪切、复制、粘贴、全选发给当前焦点对象；⌘Z 等其余按键照常交给页面。
+fn install_edit_monitor(panel: Retained<NSPanel>) {
+    let handler = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
+        let Some(main_thread) = MainThreadMarker::new() else { return event.as_ptr() };
+        if panel.isKeyWindow() {
+            if let Some(action) = edit_action(unsafe { event.as_ref() }) {
+                if unsafe { NSApplication::sharedApplication(main_thread).sendAction_to_from(action, None, None) } {
+                    return std::ptr::null_mut();
+                }
+            }
+        }
+        event.as_ptr()
+    });
+    let monitor = unsafe { NSEvent::addLocalMonitorForEventsMatchingMask_handler(NSEventMask::KeyDown, &handler) };
+    // 监听须在应用运行期间一直有效，句柄刻意不释放。
+    std::mem::forget(monitor);
+}
+
+/// 仅识别单独 Command 组合的剪切、复制、粘贴、全选。
+fn edit_action(event: &NSEvent) -> Option<Sel> {
+    let flags = event.modifierFlags();
+    if !flags.contains(NSEventModifierFlags::Command)
+        || flags.intersects(NSEventModifierFlags::Shift | NSEventModifierFlags::Option | NSEventModifierFlags::Control)
+    {
+        return None;
+    }
+    match event.charactersIgnoringModifiers()?.to_string().to_lowercase().as_str() {
+        "x" => Some(sel!(cut:)),
+        "c" => Some(sel!(copy:)),
+        "v" => Some(sel!(paste:)),
+        "a" => Some(sel!(selectAll:)),
+        _ => None,
+    }
 }
 
 /// 收起面板后隐藏应用，由系统把焦点交还之前的前台应用；应用已不在前台时无需处理。
@@ -261,7 +296,7 @@ pub fn present(window: &Window, height: f64, event: &'static str) -> Result<(), 
         let frame = if height >= 670.0 { expanded_frame(frame, screen.visibleFrame(), height) } else { frame };
         // 隐藏窗口先完成布局，交给置前操作绘制，避免提前绘制旧背景。
         native.setFrame_display(frame, false);
-        activate_application(native, main_thread);
+        bring_to_front(native, main_thread);
         // AppKit 显示面板后可能约束窗口尺寸，按最终宽度再次对齐屏幕中心。
         let actual = native.frame();
         native.setFrameOrigin(NSPoint::new(
@@ -325,7 +360,7 @@ pub fn present_plugin(window: &Window) -> Result<(), String> {
         if let Some(screen) = native.screen() {
             native.setFrame_display(expanded_frame(native.frame(), screen.visibleFrame(), 670.0), false);
         }
-        activate_application(native, main_thread);
+        bring_to_front(native, main_thread);
         settle_later(target);
     })
 }
