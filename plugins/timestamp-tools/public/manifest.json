@@ -1,0 +1,12 @@
+{
+  "apiVersion": 1,
+  "id": "timestamp-tools",
+  "name": "时间戳",
+  "version": "0.1.0",
+  "entry": "index.html",
+  "icon": "icon.svg",
+  "permissions": ["clipboard.writeText"],
+  "commands": [
+    { "id": "open", "title": "时间戳转换", "keywords": ["时间戳", "timestamp", "ts", "unix", "时间", "日期", "date", "epoch"] }
+  ]
+}

@@ -1,10 +1,27 @@
-import { useEffect, useRef, useState } from "react";
+import { useEffect, useMemo, useRef, useState } from "react";
 import { qingbox } from "../../../packages/plugin-sdk/src/index";
-import { JsonEditor } from "./JsonEditor";
+import { JsonEditor, JsonViewer } from "./JsonEditor";
 import { copyJson, formatJson, JsonFormatError } from "./format-json";
 import { compactMarkup, detectMarkup, formatMarkup } from "./format-markup";
+import { parseJson, query, stringify } from "./json-query";
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
+const HISTORY_LIMIT = 10;
+
+interface QueryOutput { text: string; summary: string; error: boolean }
+
+/** 对编辑器内容执行 JSONPath；内容为空、JSON 有误或表达式有误时返回原因。 */
+function runQuery(source: string, expression: string): QueryOutput {
+  if (!source.trim()) return { text: "", summary: "先在左侧输入 JSON", error: false };
+  let root: unknown;
+  try { root = parseJson(formatJson(source).compact); }
+  catch { return { text: "", summary: "JSON 有误，修正后才能查询", error: true }; }
+  try {
+    const { values, definite } = query(root, expression);
+    if (definite) return values.length ? { text: stringify(values[0]), summary: "找到 1 个值", error: false } : { text: "", summary: "没有找到", error: false };
+    return { text: stringify(values), summary: `共 ${values.length} 条`, error: false };
+  } catch (failure) { return { text: "", summary: message(failure), error: true }; }
+}
 
 function ShortcutSettings({ onClose }: { onClose: () => void }) {
   const [shortcut, setShortcut] = useState("");
@@ -53,9 +70,16 @@ export default function App() {
   const [settingsOpen, setSettingsOpen] = useState(false);
   const [copying, setCopying] = useState(false);
   const [loaded, setLoaded] = useState(false);
+  const [expression, setExpression] = useState("");
+  const [history, setHistory] = useState<string[]>([]);
+  const historyIndex = useRef(-1);
+  const queryInput = useRef<HTMLInputElement>(null);
   const edited = useRef(false);
   const markup = detectMarkup(value);
   const label = markup ? markup.toUpperCase() : "JSON";
+  // 查询栏对 JSON 常驻，内容为 HTML、XML 时隐藏；有表达式时才显示结果面板。
+  const showQuery = !markup;
+  const result = useMemo(() => showQuery && expression.trim() ? runQuery(value, expression) : null, [showQuery, value, expression]);
 
   useEffect(() => {
     let active = true;
@@ -63,6 +87,9 @@ export default function App() {
     void qingbox.storage.get<string>("draft").then((draft) => {
       if (active && !edited.current && typeof draft === "string") setValue(draft);
     }).catch((failure) => { if (active) setFeedback(`草稿读取失败：${message(failure)}`); }).finally(() => { if (active) setLoaded(true); });
+    void qingbox.storage.get<string[]>("queryHistory").then((saved) => {
+      if (active && Array.isArray(saved)) setHistory(saved.filter((item) => typeof item === "string").slice(0, HISTORY_LIMIT));
+    }).catch(() => {});
     return () => { active = false; };
   }, []);
 
@@ -104,20 +131,82 @@ export default function App() {
     finally { setCopying(false); }
   }
 
+  /** 记入查询历史：最新的在前，去重，最多 10 条。 */
+  function remember(text: string) {
+    const trimmed = text.trim();
+    if (!trimmed || history[0] === trimmed) return;
+    const next = [trimmed, ...history.filter((item) => item !== trimmed)].slice(0, HISTORY_LIMIT);
+    setHistory(next);
+    void qingbox.storage.set("queryHistory", next).catch(() => {});
+  }
+
+  function focusQuery() {
+    if (markup) { setFeedback("HTML、XML 不支持查询"); return; }
+    queryInput.current?.focus();
+    queryInput.current?.select();
+  }
+
+  /** 清空查询并回到编辑器，结果面板随之收起。 */
+  function clearQuery() {
+    if (result && !result.error) remember(expression);
+    setExpression("");
+    historyIndex.current = -1;
+    document.querySelector<HTMLElement>(".cm-content")?.focus();
+  }
+
+  async function copyResult() {
+    if (!result?.text) return;
+    try { await qingbox.clipboard.writeText(result.text); remember(expression); setFeedback("已复制查询结果"); }
+    catch (failure) { setFeedback(message(failure)); }
+  }
+
   useEffect(() => {
-    function handleEscape(event: KeyboardEvent) {
-      if (event.defaultPrevented || event.isComposing || event.keyCode === 229 || event.key !== "Escape") return;
+    function handleKey(event: KeyboardEvent) {
+      if (event.defaultPrevented || event.isComposing || event.keyCode === 229) return;
+      if ((event.metaKey || event.ctrlKey) && !event.shiftKey && !event.altKey && event.key.toLowerCase() === "f" && !settingsOpen) {
+        event.preventDefault();
+        focusQuery();
+        return;
+      }
+      if (event.key !== "Escape") return;
       event.preventDefault();
       if (settingsOpen) setSettingsOpen(false);
+      else if (event.target === queryInput.current && expression) clearQuery();
       else void qingbox.view.back().catch((failure) => setFeedback(message(failure)));
     }
-    window.addEventListener("keydown", handleEscape);
-    return () => window.removeEventListener("keydown", handleEscape);
-  }, [settingsOpen]);
+    window.addEventListener("keydown", handleKey);
+    return () => window.removeEventListener("keydown", handleKey);
+  });
+
+  function handleQueryKey(event: React.KeyboardEvent<HTMLInputElement>) {
+    if (event.nativeEvent.isComposing) return;
+    if (event.key === "Enter") { event.preventDefault(); if (result && !result.error) remember(expression); return; }
+    if (event.key === "Escape") return;
+    if (event.key !== "ArrowUp" && event.key !== "ArrowDown") return;
+    event.preventDefault();
+    const next = historyIndex.current + (event.key === "ArrowUp" ? 1 : -1);
+    if (next >= history.length) return;
+    historyIndex.current = Math.max(next, -1);
+    setExpression(next < 0 ? "" : history[next]);
+  }
 
   const disabled = copying || !value.trim();
   return <main className="json-plugin">
-    <JsonEditor value={value} onChange={(next) => { edited.current = true; setValue(next); setFeedback(null); }} onNormalize={(layers) => setFeedback(layers ? "已去转义并格式化" : "已自动格式化")} />
+    <div className="workspace">
+      <JsonEditor value={value} onChange={(next) => { edited.current = true; setValue(next); setFeedback(null); }} onNormalize={(layers) => setFeedback(layers ? "已去转义并格式化" : "已自动格式化")} />
+      {result && <section className="query-result" aria-label="查询结果">
+        <div className="result-heading"><span className={result.error ? "result-summary invalid" : "result-summary"} role="status">{result.summary}</span><button disabled={!result.text} onClick={() => void copyResult()}>复制结果</button></div>
+        <JsonViewer value={result.text} label="查询结果（只读）" />
+      </section>}
+    </div>
+    {showQuery && <div className="query-bar">
+      <svg viewBox="0 0 20 20" aria-hidden="true"><circle cx="9" cy="9" r="5.5" /><path d="m13.2 13.2 3.8 3.8" /></svg>
+      <input ref={queryInput} value={expression} aria-label="JSONPath 查询" spellCheck={false} autoComplete="off" autoCorrect="off" autoCapitalize="off"
+        placeholder="⌘F 查询 JSONPath，如 data.list[*].id、..name、list[?(@.age > 18)]" onKeyDown={handleQueryKey}
+        onBlur={() => { if (result && !result.error) remember(expression); }}
+        onChange={(event) => { historyIndex.current = -1; setExpression(event.target.value); }} />
+      <span className="query-hint">↑↓ 历史 · Esc 清空</span>
+    </div>}
     <div className={`editor-status${error ? " invalid" : ""}`} role="status" aria-live="polite">
       <span className="status-dot" /><span className="status-message">{error ?? feedback ?? (value.trim() ? (markup ? `${label} 内容` : "有效 JSON") : "支持 JSON、转义 JSON、HTML 与 XML")}</span><span className="line-count">{value.split("\n").length} 行</span>
       <button className="icon-button settings-button" title="插件快捷键" aria-label="插件快捷键设置" onClick={() => setSettingsOpen(true)}><svg viewBox="0 0 20 20"><path d="M4 6h12M4 14h12" /><circle cx="7" cy="6" r="2" /><circle cx="13" cy="14" r="2" /></svg></button>

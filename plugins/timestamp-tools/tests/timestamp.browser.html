@@ -1,0 +1,98 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>时间戳插件回归检查</title></head>
+<body>
+  <script type="module">
+    // 本页扮演宿主：iframe 加载插件框架页，经消息协议 v1 应答插件请求并记录调用。
+    // 断言只依赖与时区无关的秒、毫秒和 UTC 结果，任何机器上都能通过。
+    import { mountPlugin, runScenarios, writeResult } from "../../../tests/plugin-host-mock.js";
+
+    const host = mountPlugin({
+      src: "./frame.html",
+      width: 900,
+      height: 610,
+      handlers: {
+        "view.ready": () => null,
+        "view.back": () => null,
+        "clipboard.writeText": () => null,
+      },
+    });
+    const calls = host.calls;
+    const pause = (ms = 30) => new Promise((resolve) => setTimeout(resolve, ms));
+    function assert(condition, message) { if (!condition) throw new Error(message); }
+    async function until(check, message) {
+      const deadline = Date.now() + 5000;
+      while (!check()) { if (Date.now() > deadline) throw new Error(message); await pause(10); }
+    }
+
+    let win, doc, input;
+    const text = (selector) => doc.querySelector(selector)?.textContent ?? "";
+    const values = () => [...doc.querySelectorAll(".row-value")].map((node) => node.textContent);
+    function type(value) {
+      // React 受控输入需走原生 value 设置器再派发 input 事件
+      Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value").set.call(input, value);
+      input.dispatchEvent(new win.Event("input", { bubbles: true }));
+    }
+    const press = (key, options = {}) => input.dispatchEvent(new win.KeyboardEvent("keydown", { key, bubbles: true, cancelable: true, ...options }));
+
+    async function setup() {
+      ({ win, doc } = await host.ready);
+      await until(() => doc.querySelector("input"), "插件未挂载");
+      input = doc.querySelector("input");
+      await until(() => calls.some((call) => call.method === "view.ready") && host.pending === 0, "插件未通知就绪");
+    }
+
+    const scenarios = [
+      ["空输入时实时显示当前时间，根容器透明", async () => {
+        assert(text(".summary-kind") === "当前时间", "空输入时应显示当前时间");
+        const seconds = Math.floor(Date.now() / 1000);
+        assert(Math.abs(Number(values()[0]) - seconds) <= 2, "当前秒级时间戳不正确");
+        const before = values()[1];
+        await until(() => values()[1] !== before, "当前时间没有自动刷新");
+        assert(win.getComputedStyle(doc.querySelector(".time-plugin")).backgroundColor === "rgba(0, 0, 0, 0)", "根容器背景必须透明");
+      }],
+      ["秒级时间戳转换", async () => {
+        type("1727490309");
+        await until(() => text(".summary-kind") === "识别为秒级时间戳", "未识别为秒级时间戳");
+        const rows = values();
+        assert(rows[0] === "1727490309" && rows[1] === "1727490309000", "秒和毫秒结果不正确");
+        assert(rows[3] === "2024-09-28 02:25:09", `UTC 时间不正确：${rows[3]}`);
+        assert(text(".summary-detail").includes("星期"), "缺少星期与相对时间");
+      }],
+      ["毫秒级时间戳转换并保留毫秒", async () => {
+        type("1727490309123");
+        await until(() => text(".summary-kind") === "识别为毫秒级时间戳", "未识别为毫秒级时间戳");
+        assert(values()[3] === "2024-09-28 02:25:09.123", "UTC 时间未保留毫秒");
+      }],
+      ["带时区的日期转时间戳", async () => {
+        type("2024-09-28T02:25:09Z");
+        await until(() => values()[0] === "1727490309", "日期未转换为秒级时间戳");
+      }],
+      ["无法识别时提示原因并隐藏结果", async () => {
+        type("明天吃什么");
+        await until(() => doc.querySelector(".status.invalid"), "无效输入未提示");
+        assert(text(".summary-kind") === "无法识别" && values().length === 0, "无效输入不应显示结果");
+      }],
+      ["点击行与 ⌘1～⌘5 复制对应结果", async () => {
+        type("1727490309");
+        await until(() => values()[0] === "1727490309", "恢复有效输入失败");
+        doc.querySelectorAll(".row")[1].click();
+        await until(() => calls.some((call) => call.method === "clipboard.writeText" && call.params.text === "1727490309000"), "点击未复制毫秒");
+        press("4", { metaKey: true });
+        await until(() => calls.some((call) => call.method === "clipboard.writeText" && call.params.text === "2024-09-28 02:25:09"), "⌘4 未复制 UTC 时间");
+        await until(() => text(".status").includes("已复制"), "复制后未提示");
+      }],
+      ["清空后回到当前时间", async () => {
+        doc.querySelector(".text-button").click();
+        await until(() => text(".summary-kind") === "当前时间" && input.value === "", "清空后未回到当前时间");
+      }],
+      ["Esc 返回主入口", async () => {
+        press("Escape");
+        await until(() => calls.some((call) => call.method === "view.back"), "Esc 未调用 view.back");
+      }],
+    ];
+
+    runScenarios(host, setup, scenarios).then(writeResult);
+  </script>
+</body>
+</html>

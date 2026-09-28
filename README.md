@@ -48,7 +48,7 @@ https://github.com/user-attachments/assets/529072fc-3e34-4acc-8869-47c336f2e272
 
 | 插件 | 打开方式 | 能做什么 |
 | --- | --- | --- |
-| **格式化编辑器** | 搜索 `json` `xml` `html` | 粘贴即格式化 JSON / HTML / XML；自动去除整段 JSON 的外层转义；语法有误时仍按括号排版并标出错误位置；一键复制、压缩复制、压缩转义复制 |
+| **格式化编辑器** | 搜索 `json` `xml` `html` | 粘贴即格式化 JSON / HTML / XML；自动去除整段 JSON 的外层转义；语法有误时仍按括号排版并标出错误位置；底部常驻 JSONPath 查询栏（`⌘F` 聚焦）（过滤、递归、切片，大整数不丢精度）；一键复制、压缩复制、压缩转义复制 |
 | **Hosts 切换** | 搜索 `host` | 按分组管理 hosts，多组同时启用，自动检测冲突；写入系统前自动备份 |
 | **剪贴板历史** | `⌥⇧V` 或搜索 `剪贴板` | 记录文本、图片、文件，最多 200 条，只存本机；系统标记为隐私或临时的内容不记录 |
 
@@ -60,6 +60,7 @@ https://github.com/user-attachments/assets/529072fc-3e34-4acc-8869-47c336f2e272
 | --- | --- | --- |
 | **[编码工具](plugins/crypto-tools)** | 搜索 `base64` `md5` `aes` `rsa` | **编码**：Base64、URL 安全 Base64、URL 编码、Unicode 转义、Hex<br>**哈希**：MD5、SHA-1/256/512、SM3，支持 HMAC<br>**对称加密**：AES、DES、3DES、SM4，CBC / ECB / GCM<br>**非对称**：RSA、SM2、ECDSA、Ed25519 的加解密、签名验签与密钥生成 |
 | **[二维码](plugins/qr-tools)** | 搜索 `二维码` `qr` | 文字实时生成二维码；按 `⌘V` 粘贴截图即可识别其中的二维码 |
+| **[时间戳](plugins/timestamp-tools)** | 搜索 `时间戳` `ts` `unix` | 秒 / 毫秒 / 微秒 / 纳秒时间戳与日期互转，自动识别单位和常见日期格式；空输入实时显示当前时间，`⌘1`～`⌘5` 一键复制 |
 
 ### 截图
 
@@ -111,6 +112,7 @@ npm run tauri -- build --bundles app
 ```sh
 npm run build:crypto   # 产物：dist-plugins/crypto-tools
 npm run build:qr       # 产物：dist-plugins/qr-tools
+npm run build:timestamp  # 产物：dist-plugins/timestamp-tools
 ```
 
 在轻匣中打开「设置 → 插件管理 → 本地导入」，选择对应的产物目录即可。
@@ -164,6 +166,7 @@ my-plugin/
 npm run test:json      # 格式化编辑器
 npm run test:crypto    # 编码工具
 npm run test:qr        # 二维码
+npm run test:timestamp # 时间戳
 npm run test:sdk       # 插件 SDK
 npm run test:bridge    # 插件通信
 npm run test:browser   # 各插件的浏览器回归测试（需要 Chrome，可用 CHROME_PATH 指定路径）
@@ -188,7 +191,8 @@ qingxia/
 │   ├── hosts-switch/        # Hosts 切换（内置）
 │   ├── clipboard-history/   # 剪贴板历史（内置）
 │   ├── crypto-tools/        # 编码工具（外部）
-│   └── qr-tools/            # 二维码（外部）
+│   ├── qr-tools/            # 二维码（外部）
+│   └── timestamp-tools/     # 时间戳（外部）
 ├── examples/minimal-plugin/ # 最小插件示例
 ├── tests/                   # 浏览器回归测试与模拟宿主
 └── docs/                    # 设计文档与接口约定

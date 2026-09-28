@@ -105,3 +105,35 @@ export function JsonEditor({ value, onChange, onNormalize }: Props) {
 
   return <div className="editor" ref={container} />;
 }
+
+/** 只读 JSON 查看器，用于展示查询结果；不抢焦点，内容随 value 整体替换。 */
+export function JsonViewer({ value, label }: { value: string; label: string }) {
+  const container = useRef<HTMLDivElement>(null);
+  const viewer = useRef<EditorView | null>(null);
+  const initialValue = useRef(value);
+
+  useEffect(() => {
+    if (!container.current) return;
+    const view = new EditorView({
+      parent: container.current,
+      state: EditorState.create({
+        doc: initialValue.current,
+        extensions: [
+          lineNumbers(), drawSelection(), jsonLanguage, syntaxHighlighting(colors),
+          EditorState.readOnly.of(true), EditorView.editable.of(false),
+          EditorView.contentAttributes.of({ "aria-label": label, "aria-readonly": "true", tabindex: "0" }),
+          EditorView.theme({ "&": { height: "100%" }, ".cm-scroller": { overflow: "auto" } }),
+        ],
+      }),
+    });
+    viewer.current = view;
+    return () => { viewer.current = null; view.destroy(); };
+  }, [label]);
+
+  useEffect(() => {
+    const view = viewer.current;
+    if (view && view.state.doc.toString() !== value) view.dispatch({ changes: { from: 0, to: view.state.doc.length, insert: value } });
+  }, [value]);
+
+  return <div className="editor viewer" ref={container} />;
+}

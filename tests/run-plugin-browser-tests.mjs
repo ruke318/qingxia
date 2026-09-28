@@ -17,6 +17,7 @@ const pages = [
   "plugins/hosts-switch/tests/editor.browser.html",
   "plugins/clipboard-history/tests/history.browser.html",
   "plugins/qr-tools/tests/qr.browser.html",
+  "plugins/timestamp-tools/tests/timestamp.browser.html",
   "plugins/crypto-tools/tests/tools.browser.html",
   "tests/minimal-plugin.browser.html",
 ];

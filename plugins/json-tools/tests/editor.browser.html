@@ -45,6 +45,18 @@
       content.dispatchEvent(new win.ClipboardEvent("paste", { bubbles: true, cancelable: true, clipboardData: data }));
     }
 
+    const queryInput = () => doc.querySelector(".query-bar input");
+    const summary = () => doc.querySelector(".result-summary");
+    const resultText = () => {
+      const node = doc.querySelector(".viewer .cm-content");
+      return node ? win.__qingboxTestEditorView.findFromDOM(node).state.doc.toString() : null;
+    };
+    function typeQuery(value) {
+      // React 受控输入需走原生 value 设置器再派发 input 事件
+      Object.getOwnPropertyDescriptor(win.HTMLInputElement.prototype, "value").set.call(queryInput(), value);
+      queryInput().dispatchEvent(new win.Event("input", { bubbles: true }));
+    }
+
     const compact = '{"id":9007199254740993123,"id":1e+400,"path":"C:\\\\Users\\\\test","text":"a\\nb"}';
     let first, normalized;
 
@@ -135,6 +147,43 @@
         editor.scrollDOM.scrollTop = editor.scrollDOM.scrollHeight;
         const currentFooter = doc.querySelector(".copy-actions").getBoundingClientRect();
         assert(Math.abs(footer.top - currentFooter.top) < 1 && currentFooter.bottom <= win.innerHeight, "编辑区滚动改变了固定底部按钮位置");
+      }],
+      ["查询栏常驻，⌘F 聚焦，JSONPath 实时出结果并保留大整数", async () => {
+        assert(queryInput() && !doc.querySelector(".query-result"), "查询栏应常驻，未输入表达式时不显示结果面板");
+        paste('{"list":[{"id":1790000000000000123,"name":"张三","age":28},{"id":7,"name":"李四","age":16},{"id":8,"name":"王五","age":40}]}');
+        await until(() => text().includes("1790000000000000123"), "查询用数据未粘贴");
+        content.dispatchEvent(new win.KeyboardEvent("keydown", { key: "f", code: "KeyF", metaKey: true, bubbles: true, cancelable: true }));
+        await until(() => doc.activeElement === queryInput(), "⌘F 未聚焦查询栏");
+        typeQuery("list[?(@.age > 18)].id");
+        await until(() => resultText() === "[\n  1790000000000000123,\n  8\n]", `过滤结果不正确：${resultText()}`);
+        assert(summary().textContent === "共 2 条", "未显示结果条数");
+        assert(!calls.some((call) => call.method === "view.back"), "⌘F 不应退出插件");
+      }],
+      ["确定路径显示单个值，语法错误给出原因", async () => {
+        typeQuery("list[0].name");
+        await until(() => resultText() === '"张三"' && summary().textContent === "找到 1 个值", "确定路径应显示单个值");
+        typeQuery("list[");
+        await until(() => summary().classList.contains("invalid") && summary().textContent.includes("第"), "语法错误未提示原因和位置");
+        assert(resultText() === "", "语法错误时不应保留旧结果");
+      }],
+      ["复制结果并记入历史，Esc 先清空查询，↑ 找回上次查询", async () => {
+        typeQuery("list[*].name");
+        await until(() => summary().textContent === "共 3 条", "通配查询失败");
+        doc.querySelector(".result-heading button").click();
+        await until(() => calls.some((call) => call.method === "clipboard.writeText" && call.params.text === '[\n  "张三",\n  "李四",\n  "王五"\n]'), "未复制查询结果");
+        await until(() => calls.some((call) => call.method === "storage.set" && call.params.key === "queryHistory" && call.params.value[0] === "list[*].name"), "查询未记入历史");
+        queryInput().dispatchEvent(new win.KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        await until(() => queryInput().value === "" && !doc.querySelector(".query-result") && doc.activeElement === content, "Esc 未清空查询并回到编辑器");
+        assert(queryInput(), "清空后查询栏仍应常驻");
+        assert(!calls.some((call) => call.method === "view.back"), "清空查询不应同时退出插件");
+        content.dispatchEvent(new win.KeyboardEvent("keydown", { key: "f", code: "KeyF", metaKey: true, bubbles: true, cancelable: true }));
+        await until(() => doc.activeElement === queryInput(), "再次 ⌘F 未聚焦查询栏");
+        queryInput().dispatchEvent(new win.KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+        await until(() => queryInput().value === "list[*].name", "↑ 未找回上次查询");
+      }],
+      ["HTML、XML 内容不显示查询栏", async () => {
+        paste("<root><item>1</item></root>");
+        await until(() => !doc.querySelector(".query-bar"), "XML 内容仍显示查询栏");
       }],
     ];
 

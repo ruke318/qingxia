@@ -13,7 +13,20 @@ svg { width: 19px; height: 19px; fill: none; stroke: currentColor; stroke-width:
 .settings-button { flex: 0 0 24px; width: 24px; height: 24px; }
 .settings-button svg { width: 16px; height: 16px; }
 .settings-button svg circle { fill: #f9fafc; }
-.editor { flex: 1; min-height: 0; overflow: hidden; }
+.workspace { flex: 1; min-height: 0; display: flex; }
+.editor { flex: 1; min-width: 0; min-height: 0; overflow: hidden; }
+.query-result { flex: 0 0 44%; min-width: 0; display: flex; flex-direction: column; border-left: 1px solid rgba(47, 66, 88, .08); background: rgba(243, 246, 249, .35); }
+.result-heading { flex: 0 0 36px; display: flex; align-items: center; justify-content: space-between; gap: 10px; padding: 0 12px 0 18px; border-bottom: 1px solid rgba(47, 66, 88, .06); color: #8a96a3; font-size: 11px; }
+.result-summary { min-width: 0; overflow: hidden; text-overflow: ellipsis; white-space: nowrap; }
+.result-summary.invalid { color: #ad6866; }
+.result-heading button { flex-shrink: 0; border: 0; border-radius: 6px; padding: 4px 10px; background: #edf3f9; color: #547898; font-size: 11px; }
+.result-heading button:hover:not(:disabled) { background: #e2ebf4; }
+.viewer .cm-content { padding: 12px 0 20px !important; }
+.query-bar { flex: 0 0 42px; display: flex; align-items: center; gap: 9px; padding: 0 20px 0 24px; border-top: 1px solid rgba(47, 66, 88, .07); background: rgba(255, 255, 255, .35); }
+.query-bar svg { width: 15px; height: 15px; flex-shrink: 0; color: #8a9aab; }
+.query-bar input { flex: 1; min-width: 0; height: 100%; border: 0; outline: none; background: transparent; color: #3d5670; font-family: "SFMono-Regular", "SF Mono", Menlo, monospace; font-size: 13px; }
+.query-bar input::placeholder { color: #a8b0ba; }
+.query-hint { flex-shrink: 0; color: #a3adb8; font-size: 10px; white-space: nowrap; }
 .cm-editor { background: transparent; font-size: 14px; outline: none !important; }
 .cm-scroller { font-family: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace !important; line-height: 1.85; }
 .cm-content { padding: 19px 0 28px !important; caret-color: #617f9c; }

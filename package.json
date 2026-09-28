@@ -19,7 +19,9 @@
     "build:crypto": "tsc --noEmit -p plugins/crypto-tools/tsconfig.json && vite build --config vite.crypto.config.ts",
     "test:crypto": "node --experimental-strip-types --test plugins/crypto-tools/tests/*.test.ts",
     "build:qr": "tsc --noEmit -p plugins/qr-tools/tsconfig.json && vite build --config vite.qr.config.ts",
-    "test:qr": "node --experimental-strip-types --test plugins/qr-tools/tests/*.test.ts"
+    "test:qr": "node --experimental-strip-types --test plugins/qr-tools/tests/*.test.ts",
+    "build:timestamp": "tsc --noEmit -p plugins/timestamp-tools/tsconfig.json && vite build --config vite.timestamp.config.ts",
+    "test:timestamp": "node --experimental-strip-types --test plugins/timestamp-tools/tests/*.test.ts"
   },
   "dependencies": {
     "@codemirror/commands": "^6.11.1",
