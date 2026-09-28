@@ -1,15 +1,23 @@
 import { useEffect, useRef, useState } from "react";
 import { qingbox, type HostsGroup, type HostsSnapshot } from "../../../packages/plugin-sdk/src/index";
-import { HostsEditor } from "./HostsEditor";
+import { HostsEditor, type EditorPosition } from "./HostsEditor";
 
 const message = (error: unknown) => error instanceof Error ? error.message : String(error);
 type Draft = Pick<HostsGroup, "name" | "content">;
+type Tab = "groups" | "system";
+/** 上次查看的标签与分组，重新打开插件时恢复。 */
+interface LastView { tab: Tab; selected: string }
+const SYSTEM_POSITION = "system";
+// 读取失败不影响使用，只是回到默认视图。
+const stored = <T,>(key: string) => qingbox.storage.get<T>(key).catch(() => null);
 
 export default function App() {
   const [snapshot, setSnapshot] = useState<HostsSnapshot | null>(null);
   const [selected, setSelected] = useState("");
   const [drafts, setDrafts] = useState<Record<string, Draft>>({});
-  const [tab, setTab] = useState<"groups" | "system">("groups");
+  const [tab, setTab] = useState<Tab>("groups");
+  const positions = useRef<Record<string, EditorPosition>>({});
+  const positionTimer = useRef<number | undefined>(undefined);
   const [busy, setBusy] = useState(true);
   const pending = useRef(false);
   const [feedback, setFeedback] = useState("");
@@ -24,12 +32,33 @@ export default function App() {
   useEffect(() => {
     let active = true;
     void qingbox.view.ready().catch((failure) => { if (active) { setFeedback(message(failure)); setError(true); } });
-    void qingbox.hosts.get().then((value) => {
-      if (active) { setSnapshot(value); setSelected(value.groups[0]?.id ?? ""); }
+    // 编辑器创建时读取编辑位置，须在显示分组前取回。
+    void Promise.all([qingbox.hosts.get(), stored<LastView>("lastView"), stored<Record<string, EditorPosition>>("positions")]).then(([value, last, saved]) => {
+      if (!active) return;
+      positions.current = saved ?? {};
+      const remembered = value.groups.some((item) => item.id === last?.selected);
+      setSnapshot(value);
+      setSelected(remembered ? last!.selected : value.groups[0]?.id ?? "");
+      if (last?.tab === "system" || last?.tab === "groups") setTab(last.tab);
     }).catch((failure) => { if (active) { setFeedback(message(failure)); setError(true); } })
       .finally(() => { if (active) setBusy(false); });
     return () => { active = false; };
   }, []);
+
+  useEffect(() => {
+    if (snapshot) void qingbox.storage.set("lastView", { tab, selected } satisfies LastView).catch(() => {});
+  }, [snapshot !== null, tab, selected]);
+
+  function rememberPosition(key: string, position: EditorPosition) {
+    positions.current[key] = position;
+    window.clearTimeout(positionTimer.current);
+    positionTimer.current = window.setTimeout(() => {
+      // 只保留仍存在的分组，删除的分组不再占用存储。
+      const ids = new Set([SYSTEM_POSITION, ...(snapshot?.groups.map((item) => item.id) ?? [])]);
+      const kept = Object.fromEntries(Object.entries(positions.current).filter(([id]) => ids.has(id)));
+      void qingbox.storage.set("positions", kept).catch(() => {});
+    }, 400);
+  }
 
   useEffect(() => {
     function keydown(event: KeyboardEvent) {
@@ -127,14 +156,14 @@ export default function App() {
       </aside>
       {tab === "system" ? <section className="system-view" aria-label="系统完整 hosts">
         <div className="system-heading"><span>/etc/hosts</span><span>当前系统实际内容 · 只读</span></div>
-        <HostsEditor key="system" readOnly value={snapshot?.systemHosts ?? ""} />
+        <HostsEditor key="system" readOnly value={snapshot?.systemHosts ?? ""} position={positions.current[SYSTEM_POSITION]} onPosition={(position) => rememberPosition(SYSTEM_POSITION, position)} />
       </section> : group && draft ? <section className="group-editor" aria-label="编辑分组">
         <div className="editor-heading"><input aria-label="分组名称" maxLength={60} value={draft.name} autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} onChange={(event) => updateDraft({ name: event.target.value })} /><span className={`state-label${group.enabled ? " on" : ""}`} title={dirty ? "有未保存的修改" : undefined}>{group.enabled ? "已启用" : "未启用"}</span>
           <button className="icon-button delete-button" aria-label="删除当前分组" title="删除分组" disabled={busy} onClick={() => setDeleting(!deleting)}><svg viewBox="0 0 20 20"><path d="M4 5h12M8 5V3h4v2M6 5l1 12h6l1-12M9 8v6m2-6v6" /></svg></button>
           <button className="primary-button save-button" aria-label="保存当前分组" title="保存当前分组（⌘S）" aria-keyshortcuts="Meta+S Control+S" disabled={busy || !dirty} onClick={saveCurrent}>保存</button>
           {deleting && <div className="delete-confirm" role="dialog" aria-label="确认删除分组"><span>删除此分组？</span><button className="text-button" disabled={busy} onClick={() => setDeleting(false)}>取消</button><button className="danger-button" disabled={busy} onClick={() => void save(snapshot!.groups.filter((item) => item.id !== group.id), undefined, group.id)}>删除分组</button></div>}
         </div>
-        <HostsEditor key={group.id} value={draft.content} onChange={(content) => updateDraft({ content })} />
+        <HostsEditor key={group.id} value={draft.content} position={positions.current[group.id]} onChange={(content) => updateDraft({ content })} onPosition={(position) => rememberPosition(group.id, position)} />
       </section> : <section className="empty-state"><span className="empty-symbol" aria-hidden="true">#</span><strong>{busy ? "正在读取…" : "添加第一个分组"}</strong><p>把不同环境的域名分别放进分组，<br />需要时打开对应开关。</p><button className="primary-button" disabled={busy || !snapshot} onClick={createGroup}>新建分组</button></section>}
     </div>
     {!busy && snapshot && !snapshot.synced && <div className="sync-notice">系统内容已变化，可在“系统 hosts”查看；重新切换开关后应用分组。</div>}

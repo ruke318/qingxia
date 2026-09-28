@@ -22,6 +22,7 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 use crate::contracts::{AppSettings, FileResult, QueryResponse};
 
 const DEFAULT_SHORTCUT: &str = "Alt+Space";
+const DEFAULT_FULLSCREEN_SHORTCUT: &str = "Control+Super+F";
 const LAUNCHER_HEIGHT: f64 = 60.0;
 const LAUNCHER_MIN_WIDTH: f64 = 900.0;
 
@@ -31,19 +32,19 @@ struct AppState {
     shortcut_update: Mutex<()>,
 }
 
-fn settings_from_database(state: &AppState) -> AppSettings {
-    let shortcut = state
+fn setting(state: &AppState, key: &str, default: &str) -> String {
+    state
         .database
         .lock()
         .expect("设置数据库锁已中毒")
-        .query_row(
-            "SELECT value FROM settings WHERE key = 'launcher_shortcut'",
-            [],
-            |row| row.get::<_, String>(0),
-        )
-        .unwrap_or_else(|_| DEFAULT_SHORTCUT.to_string());
+        .query_row("SELECT value FROM settings WHERE key = ?1", params![key], |row| row.get::<_, String>(0))
+        .unwrap_or_else(|_| default.to_string())
+}
+
+fn settings_from_database(state: &AppState) -> AppSettings {
     AppSettings {
-        shortcut,
+        shortcut: setting(state, "launcher_shortcut", DEFAULT_SHORTCUT),
+        fullscreen_shortcut: setting(state, "fullscreen_shortcut", DEFAULT_FULLSCREEN_SHORTCUT),
         shortcut_error: state
             .shortcut_error
             .lock()
@@ -208,6 +209,33 @@ fn save_shortcut(
     Ok(settings)
 }
 
+/// 插件全屏快捷键只在面板内生效，不注册为全局快捷键。
+#[tauri::command]
+fn save_fullscreen_shortcut(app: AppHandle, state: State<'_, AppState>, shortcut: String) -> Result<AppSettings, String> {
+    let next = shortcut.trim().to_string();
+    if next.is_empty() { return Err("快捷键不能为空".into()) }
+    if next == settings_from_database(&state).shortcut { return Err("不能与唤起快捷键相同".into()) }
+    #[cfg(target_os = "macos")]
+    let parsed = native_window::parse_shortcut(&next)?;
+    state.database.lock().expect("设置数据库锁已中毒").execute(
+        "INSERT INTO settings(key, value) VALUES('fullscreen_shortcut', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        params![next],
+    ).map_err(|error| format!("快捷键保存失败：{error}"))?;
+    #[cfg(target_os = "macos")]
+    native_window::set_fullscreen_shortcut(parsed);
+    let settings = settings_from_database(&state);
+    let _ = app.emit("settings-changed", &settings);
+    Ok(settings)
+}
+
+#[tauri::command]
+fn toggle_fullscreen(window: Window) -> Result<(), String> {
+    #[cfg(target_os = "macos")]
+    return native_window::toggle_fullscreen(&window).map_err(|error| format!("切换全屏失败：{error}"));
+    #[cfg(not(target_os = "macos"))]
+    { let _ = window; Ok(()) }
+}
+
 #[tauri::command]
 fn hide_launcher(window: Window) -> Result<(), String> {
     plugins::hide_active(window.app_handle());
@@ -229,6 +257,8 @@ fn resize_launcher(window: Window, height: f64) -> Result<(), String> {
 fn open_settings(window: Window) -> Result<(), String> {
     plugins::hide_active(window.app_handle());
     if let Some(view) = window.app_handle().get_webview("main") { let _ = view.set_focus(); }
+    #[cfg(target_os = "macos")]
+    native_window::exit_fullscreen(&window)?;
     resize_panel(&window, 670.0).map_err(|error| format!("打开设置失败：{error}"))?;
     #[cfg(target_os = "macos")]
     return Ok(());
@@ -610,11 +640,16 @@ pub fn run() {
                 if app.get_window("main").is_some() {
                     if let Some(webview) = app.get_webview_window("main") { native_window::prepare(&webview).map_err(anyhow::Error::msg)?; }
                 }
+                let fullscreen = settings_from_database(app.state::<AppState>().inner()).fullscreen_shortcut;
+                match native_window::parse_shortcut(&fullscreen).or_else(|_| native_window::parse_shortcut(DEFAULT_FULLSCREEN_SHORTCUT)) {
+                    Ok(shortcut) => native_window::set_fullscreen_shortcut(shortcut),
+                    Err(error) => eprintln!("全屏快捷键无效：{error}"),
+                }
             }
             show_launcher(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_shortcut, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
+        .invoke_handler(tauri::generate_handler![get_settings, save_shortcut, save_fullscreen_shortcut, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
         .on_window_event(|window, event| {
             if let WindowEvent::Focused(false) = event {
                 #[cfg(target_os = "macos")]

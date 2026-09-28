@@ -4,6 +4,7 @@ use serde::Serialize;
 #[serde(rename_all = "camelCase")]
 pub struct AppSettings {
     pub shortcut: String,
+    pub fullscreen_shortcut: String,
     pub shortcut_error: Option<String>,
 }
 

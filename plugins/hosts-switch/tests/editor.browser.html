@@ -9,6 +9,8 @@
     { id: "dev", name: "开发环境", content: "# 本地服务\n127.0.0.1 api.dev.test\n127.0.0.1 admin.dev.test", enabled: false },
     { id: "test", name: "测试环境", content: "10.0.0.25 api.test.test", enabled: false },
   ];
+  // 预置上次的视图与编辑位置，验证重新打开插件时恢复
+  const storage = new Map([["lastView", { tab: "groups", selected: "dev" }], ["positions", { dev: { anchor: 8, head: 8, top: 0 } }]]);
   let revision = 1, failNext = false, holdNext = false, releaseSave;
   const state = () => ({ groups: structuredClone(groups), version: String(revision), systemHosts: original + groups.filter((item) => item.enabled).map((item) => `# ${item.name}\n${item.content}\n`).join(""), synced: true, notice: "已应用，原 hosts 已自动备份" });
   // 框架页内 #root 固定 685×610 且上下左右留 24px，iframe 按此留足空间
@@ -24,6 +26,8 @@
         if (holdNext) { holdNext = false; await new Promise((resolve) => { releaseSave = resolve; }); }
         groups = structuredClone(params.groups); revision += 1; return state();
       },
+      "storage.get": ({ key }) => storage.get(key) ?? null,
+      "storage.set": ({ key, value }) => { storage.set(key, structuredClone(value)); return null; },
       "shortcuts.get": () => "",
       "shortcuts.set": () => null,
       "view.ready": () => null,
@@ -66,6 +70,23 @@
   }
 
   const scenarios = [
+    ["重新打开时恢复上次的分组与光标位置", async () => {
+      const view = EditorView.findFromDOM(document.querySelector('[aria-label="分组 hosts 内容"]'));
+      assert(document.querySelector('.group-row.selected')?.textContent.includes("开发环境"), "未恢复上次选中的分组");
+      assert(view.state.selection.main.head === 8, `未恢复上次的光标位置：${view.state.selection.main.head}`);
+    }],
+    ["⌘/ 注释与取消注释当前行", async () => {
+      const content = document.querySelector('[aria-label="分组 hosts 内容"]');
+      const view = EditorView.findFromDOM(content);
+      const original = editorValue(content);
+      view.dispatch({ selection: { anchor: original.indexOf("127.0.0.1 api") } });
+      content.focus();
+      const press = () => content.dispatchEvent(new win.KeyboardEvent("keydown", { key: "/", code: "Slash", metaKey: true, bubbles: true, cancelable: true }));
+      press();
+      await until(() => editorValue(content).includes("# 127.0.0.1 api.dev.test"), "⌘/ 没有注释当前行");
+      press();
+      await until(() => editorValue(content) === original, "再次 ⌘/ 没有取消注释");
+    }],
     ["IP、多个域名及中文注释实时区分，IPv6 高亮、原文和撤销均正常", async () => {
       const content = document.querySelector('[aria-label="分组 hosts 内容"]');
       const initialContent = editorValue(content);
@@ -102,6 +123,9 @@
       const system = document.querySelector('.system-editor .cm-content');
       assert(system.getAttribute("aria-readonly") === "true" && !system.isContentEditable, "完整系统 hosts 不可编辑");
       assert(editorValue(system).includes("localhost") && editorValue(system).includes("api.dev.test") && editorValue(system).includes("api.test.test"), "完整系统视图缺少原始内容或启用分组");
+      await until(() => storage.get("lastView")?.tab === "system", "未记住切换到系统 hosts");
+      EditorView.findFromDOM(system).dispatch({ selection: { anchor: 3 } });
+      await until(() => storage.get("positions")?.system?.head === 3, "未记住系统 hosts 的光标位置");
     }],
     ["启用分组可以编辑，系统菜单只读，保存和删除集中在右上方", async () => {
       document.querySelector('.group-name:not(.system-link)').click();

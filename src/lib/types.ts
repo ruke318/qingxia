@@ -1,5 +1,6 @@
 export interface AppSettings {
   shortcut: string;
+  fullscreenShortcut: string;
   shortcutError: string | null;
 }
 

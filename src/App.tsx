@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getSettings, hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, onSettingsChanged, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, saveShortcut, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
+import { getSettings, hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, onSettingsChanged, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, saveShortcut, saveFullscreenShortcut, toggleFullscreen, onFullscreenToggle, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
 import type { AppSettings, PluginCommand, PluginResult, SearchResult } from "./lib/types";
 import { FileIcon } from "./components/FileIcon";
 import { ApplicationIcon } from "./components/ApplicationIcon";
@@ -10,8 +10,38 @@ import { PluginManager } from "./features/plugins/PluginManager";
 import { PluginFrame } from "./features/plugins/PluginFrame";
 import { fileType } from "./lib/file-types";
 
+const KEY_LABELS: Record<string, string> = { Super: "⌘", Command: "⌘", Control: "⌃", Alt: "⌥", Shift: "⇧", Space: "空格" };
+
+function ShortcutRecorder({ label, value, onChange, onEscape }: { label: string; value: string; onChange: (value: string) => void; onEscape: () => void }) {
+  return (
+    <>
+      <span className="shortcut-label">{label}</span>
+      <label className="shortcut-recorder" title="点击后按下新的组合键">
+        <input
+          className="shortcut-input"
+          aria-label={label}
+          readOnly
+          value={value}
+          onKeyDown={(event) => {
+            if (event.key === "Tab") return;
+            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onEscape(); return; }
+            event.preventDefault();
+            const parts = [event.metaKey ? "Super" : "", event.ctrlKey ? "Control" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : ""]
+              .filter(Boolean);
+            if (["Meta", "Control", "Alt", "Shift"].includes(event.key)) return;
+            const key = event.code.startsWith("Key") ? event.code.slice(3) : event.code.startsWith("Digit") ? event.code.slice(5) : event.code === "Space" ? "Space" : event.key;
+            if (parts.length) onChange([...parts, key].join("+"));
+          }}
+        />
+        <span className="shortcut-keycaps" aria-hidden="true">{value.split("+").map((key, index) => <kbd key={index}>{KEY_LABELS[key] ?? key}</kbd>)}</span>
+      </label>
+    </>
+  );
+}
+
 function ShortcutSettings({ initial, onClose }: { initial: AppSettings; onClose: () => void }) {
   const [shortcut, setShortcut] = useState(initial.shortcut);
+  const [fullscreen, setFullscreen] = useState(initial.fullscreenShortcut);
   const [status, setStatus] = useState<string | null>(initial.shortcutError);
   const [saving, setSaving] = useState(false);
 
@@ -19,8 +49,10 @@ function ShortcutSettings({ initial, onClose }: { initial: AppSettings; onClose:
     setSaving(true);
     setStatus(null);
     try {
-      const next = await saveShortcut(shortcut.trim());
+      await saveShortcut(shortcut.trim());
+      const next = await saveFullscreenShortcut(fullscreen.trim());
       setShortcut(next.shortcut);
+      setFullscreen(next.fullscreenShortcut);
       setStatus("快捷键已启用");
     } catch (error) {
       setStatus(error instanceof Error ? error.message : String(error));
@@ -36,28 +68,10 @@ function ShortcutSettings({ initial, onClose }: { initial: AppSettings; onClose:
           <button className="icon-button" onClick={onClose} aria-label="返回主入口"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5" /></svg></button>
           <h1>设置</h1>
         </div>
-        {status && <p role="status" title={status} className={status.includes("失败") || status.includes("请") ? "setting-status error" : "setting-status"}>{status}</p>}
+        {status && <p role="status" title={status} className={status.includes("失败") || status.includes("请") || status.includes("不") ? "setting-status error" : "setting-status"}>{status}</p>}
         <div className="shortcut-controls">
-          <span className="shortcut-label">唤起快捷键</span>
-          <label className="shortcut-recorder" title="点击后按下新的组合键">
-            <input
-              className="shortcut-input"
-              aria-label="唤起快捷键"
-              readOnly
-              value={shortcut}
-              onKeyDown={(event) => {
-                if (event.key === "Tab") return;
-                if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onClose(); return; }
-                event.preventDefault();
-                const parts = [event.metaKey ? "Super" : "", event.ctrlKey ? "Control" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : ""]
-                  .filter(Boolean);
-                if (["Meta", "Control", "Alt", "Shift"].includes(event.key)) return;
-                const key = event.code.startsWith("Key") ? event.code.slice(3) : event.code.startsWith("Digit") ? event.code.slice(5) : event.code === "Space" ? "Space" : event.key;
-                if (parts.length) setShortcut([...parts, key].join("+"));
-              }}
-            />
-            <span className="shortcut-keycaps" aria-hidden="true">{shortcut.split("+").map((key, index) => <kbd key={index}>{({ Super: "⌘", Command: "⌘", Control: "⌃", Alt: "⌥", Shift: "⇧", Space: "空格" } as Record<string, string>)[key] ?? key}</kbd>)}</span>
-          </label>
+          <ShortcutRecorder label="唤起快捷键" value={shortcut} onChange={setShortcut} onEscape={onClose} />
+          <ShortcutRecorder label="插件全屏" value={fullscreen} onChange={setFullscreen} onEscape={onClose} />
           <button className="shortcut-save" aria-label="保存快捷键" disabled={saving} onClick={() => void submit()}>{saving ? "保存中…" : "保存"}</button>
         </div>
       </div>
@@ -283,8 +297,10 @@ function Launcher({ view, settings, plugin, onSettings, onPlugin, onReturn }: { 
 
 export default function App() {
   const [view, setView] = useState<View>("launcher");
-  const [settings, setSettings] = useState<AppSettings>({ shortcut: "Alt+Space", shortcutError: null });
+  const [settings, setSettings] = useState<AppSettings>({ shortcut: "Alt+Space", fullscreenShortcut: "Control+Super+F", shortcutError: null });
   const [plugin, setPlugin] = useState<ActivePlugin | null>(null);
+  const viewRef = useRef(view);
+  viewRef.current = view;
 
   useEffect(() => {
     void getSettings().then(setSettings);
@@ -302,6 +318,8 @@ export default function App() {
       onPluginClosed((token) => setPlugin((current) => current?.token === token ? null : current)),
       onPluginError(() => setView("launcher")),
       onLauncherFocus(() => setView("launcher")),
+      // 全屏只对插件生效；离开插件、重新唤起时由原生层恢复普通尺寸。
+      onFullscreenToggle(() => { if (viewRef.current === "plugin") void toggleFullscreen(); }),
     ]).then((callbacks) => {
       if (cancelled) callbacks.forEach((dispose) => dispose());
       else disposers.push(...callbacks);

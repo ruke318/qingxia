@@ -1,4 +1,4 @@
-use std::{cell::{Cell, RefCell}, ptr::NonNull, time::{Duration, Instant}};
+use std::{cell::{Cell, RefCell}, ptr::NonNull, sync::Mutex, time::{Duration, Instant}};
 use block2::RcBlock;
 use objc2::{MainThreadMarker, MainThreadOnly, Message, rc::Retained, runtime::{AnyClass, ProtocolObject, Sel}, sel};
 use objc2_app_kit::{
@@ -16,7 +16,12 @@ thread_local! {
     static ACTIVATION_PENDING: Cell<bool> = const { Cell::new(false) };
     static PRESENTED_AT: Cell<Option<Instant>> = const { Cell::new(None) };
     static ACTIVATION_OBSERVERS: RefCell<Vec<Retained<ProtocolObject<dyn NSObjectProtocol>>>> = const { RefCell::new(Vec::new()) };
+    /// 全屏前的面板位置与尺寸；有值即表示处于全屏。
+    static RESTORE_FRAME: Cell<Option<NSRect>> = const { Cell::new(None) };
 }
+
+/// 面板内切换全屏的快捷键：修饰键组合与不带修饰键时按键产生的字符。
+static FULLSCREEN_SHORTCUT: Mutex<Option<(NSEventModifierFlags, String)>> = Mutex::new(None);
 
 fn observe_activation(window: &WebviewWindow) {
     let center = NSNotificationCenter::defaultCenter();
@@ -98,7 +103,7 @@ pub fn prepare(window: &WebviewWindow) -> Result<(), String> {
     }
     configure_material(&content, main_thread);
     observe_activation(window);
-    install_edit_monitor(panel.as_panel().retain());
+    install_edit_monitor(panel.as_panel().retain(), window.as_ref().window());
     Ok(())
 }
 
@@ -165,6 +170,8 @@ fn overlay_material(material: &NSView, main_thread: MainThreadMarker) {
         let glass = NSGlassEffectView::initWithFrame(NSGlassEffectView::alloc(main_thread), frame);
         glass.setStyle(NSGlassEffectViewStyle::Regular);
         glass.setCornerRadius(22.0);
+        // 纯玻璃过于通透，背后内容杂乱时文字难以辨认；叠加白色底色提高可读性。
+        glass.setTintColor(Some(&NSColor::colorWithWhite_alpha(1.0, 0.3)));
         material.setHidden(true);
         Retained::into_super(glass)
     } else {
@@ -217,10 +224,15 @@ fn bring_to_front(native: &NSPanel, main_thread: MainThreadMarker) {
 
 /// 应用不激活时系统“编辑”菜单不响应快捷键。面板为键盘焦点时截获单独的 ⌘X/C/V/A，
 /// 把剪切、复制、粘贴、全选发给当前焦点对象；⌘Z 等其余按键照常交给页面。
-fn install_edit_monitor(panel: Retained<NSPanel>) {
+/// 同时截获全屏快捷键（焦点在插件 iframe 内也能收到），交给主页面判断当前是否在插件视图。
+fn install_edit_monitor(panel: Retained<NSPanel>, window: Window) {
     let handler = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let Some(main_thread) = MainThreadMarker::new() else { return event.as_ptr() };
         if panel.isKeyWindow() {
+            if is_fullscreen_shortcut(unsafe { event.as_ref() }) {
+                let _ = window.emit_to("main", "panel-fullscreen-toggle", ());
+                return std::ptr::null_mut();
+            }
             if let Some(action) = edit_action(unsafe { event.as_ref() }) {
                 if unsafe { NSApplication::sharedApplication(main_thread).sendAction_to_from(action, None, None) } {
                     return std::ptr::null_mut();
@@ -249,6 +261,50 @@ fn edit_action(event: &NSEvent) -> Option<Sel> {
         "a" => Some(sel!(selectAll:)),
         _ => None,
     }
+}
+
+const SHORTCUT_MODIFIERS: NSEventModifierFlags = NSEventModifierFlags::Command
+    .union(NSEventModifierFlags::Control)
+    .union(NSEventModifierFlags::Option)
+    .union(NSEventModifierFlags::Shift);
+
+/// 解析设置页录制的快捷键（如 Control+Super+F）。至少包含 ⌘、⌃、⌥ 之一，避免吞掉普通输入。
+pub fn parse_shortcut(text: &str) -> Result<(NSEventModifierFlags, String), String> {
+    let parts: Vec<&str> = text.split('+').map(str::trim).collect();
+    let (key, modifiers) = parts.split_last().ok_or("快捷键不能为空")?;
+    let mut flags = NSEventModifierFlags::empty();
+    for modifier in modifiers {
+        flags |= match *modifier {
+            "Super" | "Command" | "Cmd" => NSEventModifierFlags::Command,
+            "Control" | "Ctrl" => NSEventModifierFlags::Control,
+            "Alt" | "Option" => NSEventModifierFlags::Option,
+            "Shift" => NSEventModifierFlags::Shift,
+            other => return Err(format!("无法识别的修饰键：{other}")),
+        };
+    }
+    if !flags.intersects(NSEventModifierFlags::Command | NSEventModifierFlags::Control | NSEventModifierFlags::Option) {
+        return Err("快捷键需要包含 ⌘、⌃ 或 ⌥".into());
+    }
+    let character = match *key {
+        "Space" => " ".to_string(),
+        "Enter" => "\r".to_string(),
+        key if key.chars().count() == 1 => key.to_lowercase(),
+        other => return Err(format!("暂不支持用 {other} 作为全屏快捷键")),
+    };
+    Ok((flags, character))
+}
+
+pub fn set_fullscreen_shortcut(shortcut: (NSEventModifierFlags, String)) {
+    *FULLSCREEN_SHORTCUT.lock().expect("全屏快捷键锁已中毒") = Some(shortcut);
+}
+
+fn is_fullscreen_shortcut(event: &NSEvent) -> bool {
+    let Ok(shortcut) = FULLSCREEN_SHORTCUT.lock() else { return false };
+    let Some((flags, character)) = shortcut.as_ref() else { return false };
+    if event.modifierFlags() & SHORTCUT_MODIFIERS != *flags { return false }
+    // 按不带修饰键时产生的字符比较，Shift、Option 不会把字母变成其他符号。
+    event.charactersByApplyingModifiers(NSEventModifierFlags::empty())
+        .is_some_and(|text| text.to_string().to_lowercase() == *character)
 }
 
 /// 收起面板后隐藏应用，由系统把焦点交还之前的前台应用；应用已不在前台时无需处理。
@@ -292,6 +348,7 @@ pub fn present(window: &Window, height: f64, event: &'static str) -> Result<(), 
             return;
         };
         // 全程使用 AppKit 的逻辑坐标，避免混合缩放显示器间的坐标换算错误。
+        RESTORE_FRAME.set(None);
         let frame = launcher_frame(screen.frame(), screen.visibleFrame(), height);
         let frame = if height >= 670.0 { expanded_frame(frame, screen.visibleFrame(), height) } else { frame };
         // 隐藏窗口先完成布局，交给置前操作绘制，避免提前绘制旧背景。
@@ -346,19 +403,44 @@ pub fn hide_app(window: &Window) -> Result<(), String> {
 
 pub fn resize(window: &Window, height: f64) -> Result<(), String> {
     on_main_thread(window, move |_, native, _| {
+        // 全屏时插件视图仍会请求完整高度，保持全屏；回到搜索时先恢复原位置再收缩。
+        if RESTORE_FRAME.get().is_some() && height >= 670.0 { return }
+        let current = RESTORE_FRAME.take().unwrap_or_else(|| native.frame());
         if let Some(screen) = native.screen() {
             native.setFrame_display(
-                expanded_frame(native.frame(), screen.visibleFrame(), height),
+                expanded_frame(current, screen.visibleFrame(), height),
                 true,
             );
         }
     })
 }
 
+/// 插件全屏：铺满当前屏幕的可用区域（不含菜单栏和程序坞），再次切换恢复原位置与尺寸。
+pub fn toggle_fullscreen(window: &Window) -> Result<(), String> {
+    on_main_thread(window, |_, native, _| {
+        if let Some(frame) = RESTORE_FRAME.take() {
+            native.setFrame_display(frame, true);
+            return;
+        }
+        let Some(screen) = native.screen() else { return };
+        RESTORE_FRAME.set(Some(native.frame()));
+        native.setFrame_display(screen.visibleFrame(), true);
+    })
+}
+
+/// 离开插件视图（如打开设置）时退出全屏。
+pub fn exit_fullscreen(window: &Window) -> Result<(), String> {
+    on_main_thread(window, |_, native, _| {
+        if let Some(frame) = RESTORE_FRAME.take() { native.setFrame_display(frame, true); }
+    })
+}
+
 pub fn present_plugin(window: &Window) -> Result<(), String> {
     on_main_thread(window, move |target, native, main_thread| {
+        // 每次打开插件都从普通尺寸开始。
+        let current = RESTORE_FRAME.take().unwrap_or_else(|| native.frame());
         if let Some(screen) = native.screen() {
-            native.setFrame_display(expanded_frame(native.frame(), screen.visibleFrame(), 670.0), false);
+            native.setFrame_display(expanded_frame(current, screen.visibleFrame(), 670.0), false);
         }
         bring_to_front(native, main_thread);
         settle_later(target);
@@ -368,6 +450,16 @@ pub fn present_plugin(window: &Window) -> Result<(), String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 全屏快捷键解析修饰键与按键() {
+        let (flags, key) = parse_shortcut("Control+Super+F").unwrap();
+        assert_eq!(flags, NSEventModifierFlags::Control | NSEventModifierFlags::Command);
+        assert_eq!(key, "f");
+        assert_eq!(parse_shortcut("Alt+Space").unwrap().1, " ");
+        assert!(parse_shortcut("Shift+F").is_err(), "只有 Shift 会吞掉普通输入");
+        assert!(parse_shortcut("Super+ArrowUp").is_err());
+    }
 
     #[test]
     fn 实际宽度受系统约束后仍按左右等距定位() {

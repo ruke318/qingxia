@@ -1,11 +1,14 @@
 import { useEffect, useRef } from "react";
-import { EditorState } from "@codemirror/state";
+import { EditorSelection, EditorState } from "@codemirror/state";
 import { EditorView, drawSelection, keymap, placeholder } from "@codemirror/view";
 import { defaultKeymap, history, historyKeymap } from "@codemirror/commands";
 import { HighlightStyle, StreamLanguage, syntaxHighlighting } from "@codemirror/language";
 import { tags } from "@lezer/highlight";
+import { qingbox } from "../../../packages/plugin-sdk/src/index";
 
 const hostsLanguage = StreamLanguage.define({
+  // 声明行注释符号，⌘/ 才能注释和取消注释
+  languageData: { commentTokens: { line: "#" } },
   startState: () => ({ first: true }),
   token(stream, state) {
     if (stream.sol()) state.first = true;
@@ -23,25 +26,37 @@ const colors = HighlightStyle.define([
   { tag: tags.comment, class: "hosts-comment" },
 ]);
 
+/** 编辑位置：选区两端与顶部可见行的文档偏移。 */
+export interface EditorPosition { anchor: number; head: number; top: number }
+
 interface Props {
   value: string;
   readOnly?: boolean;
+  position?: EditorPosition;
   onChange?: (value: string) => void;
+  onPosition?: (position: EditorPosition) => void;
 }
 
-export function HostsEditor({ value, readOnly = false, onChange }: Props) {
+export function HostsEditor({ value, readOnly = false, position, onChange, onPosition }: Props) {
   const container = useRef<HTMLDivElement>(null);
   const editor = useRef<EditorView | null>(null);
   const callback = useRef(onChange);
   callback.current = onChange;
+  const positionCallback = useRef(onPosition);
+  positionCallback.current = onPosition;
   const initialValue = useRef(value);
+  const initialPosition = useRef(position);
 
   useEffect(() => {
     if (!container.current) return;
+    const length = initialValue.current.length;
+    const clamp = (offset: number) => Math.min(Math.max(offset, 0), length);
+    const start = initialPosition.current;
     const view = new EditorView({
       parent: container.current,
       state: EditorState.create({
         doc: initialValue.current,
+        selection: start ? EditorSelection.single(clamp(start.anchor), clamp(start.head)) : undefined,
         extensions: [
           hostsLanguage, syntaxHighlighting(colors), drawSelection(), history(),
           keymap.of([...defaultKeymap, ...historyKeymap]),
@@ -54,12 +69,27 @@ export function HostsEditor({ value, readOnly = false, onChange }: Props) {
           placeholder("# 一行一个 IP，可填写多个域名\n127.0.0.1   example.test\n::1         ipv6.test"),
           EditorView.updateListener.of((update) => {
             if (update.docChanged) callback.current?.(update.state.doc.toString());
+            if (update.docChanged || update.selectionSet) report();
           }),
         ],
       }),
     });
+    function report() {
+      const { anchor, head } = view.state.selection.main;
+      const top = view.lineBlockAtHeight(Math.max(view.scrollDOM.scrollTop - view.documentPadding.top, 0)).from;
+      positionCallback.current?.({ anchor, head, top });
+    }
+    // 滚动到上次顶部可见行；插件在隐藏状态下加载时无法滚动，首次显示后再补一次。
+    const restore = () => { if (start) view.dispatch({ effects: EditorView.scrollIntoView(clamp(start.top), { y: "start" }) }); };
+    restore();
+    let restored = false;
+    const stop = qingbox.events.on("view.shown", () => {
+      if (!restored) { restored = true; restore(); }
+      if (!readOnly && !container.current?.ownerDocument.activeElement?.closest("input,textarea,button,[contenteditable]")) view.focus();
+    });
+    view.scrollDOM.addEventListener("scroll", report, { passive: true });
     editor.current = view;
-    return () => { editor.current = null; view.destroy(); };
+    return () => { stop(); editor.current = null; view.destroy(); };
   }, [readOnly]);
 
   useEffect(() => {

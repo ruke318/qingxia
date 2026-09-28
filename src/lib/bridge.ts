@@ -23,13 +23,28 @@ export function nextQueryRequestId(): number {
 }
 
 export async function getSettings(): Promise<AppSettings> {
-  if (!isDesktop) return { shortcut: "Alt+Space", shortcutError: null };
+  if (!isDesktop) return { shortcut: "Alt+Space", fullscreenShortcut: "Control+Super+F", shortcutError: null };
   return invoke("get_settings");
 }
 
 export async function saveShortcut(shortcut: string): Promise<AppSettings> {
   if (!isDesktop) throw new Error("请在桌面应用中设置全局快捷键");
   return invoke("save_shortcut", { shortcut });
+}
+
+export async function saveFullscreenShortcut(shortcut: string): Promise<AppSettings> {
+  if (!isDesktop) throw new Error("请在桌面应用中设置快捷键");
+  return invoke("save_fullscreen_shortcut", { shortcut });
+}
+
+export async function toggleFullscreen(): Promise<void> {
+  if (isDesktop) await invoke("toggle_fullscreen");
+}
+
+/** 面板内按下全屏快捷键（焦点在插件 iframe 内也会触发）。 */
+export async function onFullscreenToggle(callback: () => void): Promise<() => void> {
+  if (!isDesktop) return () => {};
+  return listen("panel-fullscreen-toggle", callback);
 }
 
 export async function hideLauncher(): Promise<void> {
