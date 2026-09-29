@@ -146,7 +146,7 @@ my-plugin/
 | [`packages/plugin-sdk`](packages/plugin-sdk) | TypeScript SDK，所有内置与外部插件都基于它编写 |
 | [接口约定](docs/接口约定.md) | 清单字段、沙箱限制、消息协议 v1、全部宿主能力与错误码 |
 
-> 面板背景由宿主统一绘制，插件页面和根容器背景请保持透明，分区只使用低不透明度的半透明色。
+> 面板背景和配色由宿主统一管理：宿主会自动为插件注入主题样式表，插件页面保持透明，背景、边框等颜色只引用 `var(--qb-*)` 主题变量（见[接口约定](docs/接口约定.md)）。这样宿主调整外观时，插件无需修改。
 
 ## 🔐 隐私与安全
 
@@ -169,7 +169,8 @@ npm run test:qr        # 二维码
 npm run test:timestamp # 时间戳
 npm run test:sdk       # 插件 SDK
 npm run test:bridge    # 插件通信
-npm run test:browser   # 各插件的浏览器回归测试（需要 Chrome，可用 CHROME_PATH 指定路径）
+npm run test:colors    # 检查插件样式没有写死颜色
+npm run test:browser   # 颜色检查 + 各插件的浏览器回归测试（需要 Chrome，可用 CHROME_PATH 指定路径）
 cd src-tauri && cargo test
 ```
 

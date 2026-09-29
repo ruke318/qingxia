@@ -35,6 +35,23 @@ pub struct PluginState {
 }
 
 /// 插件资源响应的 CSP（方案 10.2，PL11 实测）：沙箱不透明来源下 `'self'` 不匹配，只能写完整源。
+/// 宿主主题样式表：插件只引用其中的颜色变量，调整外观时只改这一份，插件无需改动。
+const THEME_CSS: &str = include_str!("../../../packages/plugin-sdk/theme.css");
+/// 主题样式表在插件资源中的保留路径，插件自身不能使用。
+const THEME_PATH: &str = "__qingbox/theme.css";
+
+/// 在 HTML 的 `<head>` 开头插入主题样式表，插件自己的样式在其后加载，可按需覆盖。
+fn inject_theme(html: &[u8], token: &str) -> Vec<u8> {
+    let link = format!("<link rel=\"stylesheet\" href=\"/{token}/{THEME_PATH}\">");
+    let text = String::from_utf8_lossy(html);
+    let insert_at = text.to_ascii_lowercase().find("<head").and_then(|start| text[start..].find('>').map(|end| start + end + 1)).unwrap_or(0);
+    let mut output = String::with_capacity(text.len() + link.len());
+    output.push_str(&text[..insert_at]);
+    output.push_str(&link);
+    output.push_str(&text[insert_at..]);
+    output.into_bytes()
+}
+
 const PLUGIN_CSP: &str = "default-src 'none'; script-src qingbox-plugin://localhost; style-src qingbox-plugin://localhost 'unsafe-inline'; img-src qingbox-plugin://localhost data:; font-src qingbox-plugin://localhost; connect-src 'none'; frame-src 'none'; object-src 'none'; base-uri 'none'; form-action 'none'";
 
 /// 插件网关的结构化错误；`code` 取值与 SDK `protocol.ts` 的 `QINGBOX_ERROR_CODES` 一致，`message` 为中文。
@@ -213,6 +230,8 @@ pub fn resource(app: &AppHandle, label: &str, path: &str) -> tauri::http::Respon
         let state = app.state::<PluginState>();
         let active = state.active.lock().map_err(|_| "插件状态不可用")?.clone();
         let (plugin_id, file) = authorize_resource(active.as_ref(), label, path)?;
+        if file == THEME_PATH { return Ok((THEME_CSS.as_bytes().to_vec(), "text/css; charset=utf-8")) }
+        let token = active.as_ref().map(|instance| instance.token.clone()).unwrap_or_default();
         let plugin = state.plugins.lock().map_err(|_| "插件目录不可用")?.get(&plugin_id).cloned().ok_or("插件不存在")?;
         let path = resolve_asset(&plugin.root, &file)?;
         let mime = match path.extension().and_then(|value| value.to_str()).unwrap_or("") {
@@ -221,7 +240,7 @@ pub fn resource(app: &AppHandle, label: &str, path: &str) -> tauri::http::Respon
             "json" => "application/json", "woff2" => "font/woff2", _ => "application/octet-stream",
         };
         let bytes = std::fs::read(path).map_err(|_| "读取插件资源失败")?;
-        Ok((bytes, mime))
+        Ok((if mime.starts_with("text/html") { inject_theme(&bytes, &token) } else { bytes }, mime))
     })();
     let (status, body, mime) = match result {
         Ok((body, mime)) => (200, body, mime), Err(error) => (403, error.into_bytes(), "text/plain; charset=utf-8"),
@@ -407,6 +426,16 @@ fn decode_resource_path(path: &str) -> Result<String, String> {
 #[cfg(test)]
 mod tests {
     use super::*;
+    #[test]
+    fn 主题样式表插在_head_开头且插件样式在其后() {
+        let html = inject_theme(b"<!doctype html><html><HEAD lang=\"zh\"><link rel=\"stylesheet\" href=\"./a.css\"></head></html>", "t1");
+        let html = String::from_utf8(html).unwrap();
+        assert!(html.contains("<HEAD lang=\"zh\"><link rel=\"stylesheet\" href=\"/t1/__qingbox/theme.css\"><link rel=\"stylesheet\" href=\"./a.css\">"));
+        // 没有 head 时插在最前面。
+        assert!(String::from_utf8(inject_theme(b"<p>hi</p>", "t2")).unwrap().starts_with("<link rel=\"stylesheet\" href=\"/t2/__qingbox/theme.css\"><p>"));
+        assert!(THEME_CSS.contains("--qb-accent"));
+    }
+
     #[test]
     fn 结构化错误按协议格式序列化且未指定错误码的中文错误归为内部错误() {
         assert_eq!(serde_json::to_value(CallError::new("not_found", "插件不存在")).unwrap(), json!({ "code": "not_found", "message": "插件不存在" }));

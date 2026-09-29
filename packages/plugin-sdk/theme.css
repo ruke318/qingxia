@@ -1,0 +1,73 @@
+/*
+ * 轻匣插件主题：由宿主在插件页面 <head> 最前面自动注入，随应用一起更新。
+ * 插件只引用这里的变量，不写死颜色；调整面板材质、主色或将来支持深色模式时，只改本文件，插件无需改动。
+ * 面板背后是半透明玻璃：分区、按钮、选中态一律使用半透明色；只有浮在内容上的弹出层使用实色。
+ * 基础样式都包在 :where() 中，优先级为 0，插件自己的样式总能覆盖。
+ */
+:root {
+  color-scheme: light;
+
+  /* 字体 */
+  --qb-font: "SF Pro Text", "PingFang SC", -apple-system, BlinkMacSystemFont, sans-serif;
+  --qb-font-mono: "SFMono-Regular", "SF Mono", Menlo, Consolas, monospace;
+
+  /* 文字：正文、次要说明、占位与禁用 */
+  --qb-text: #262b31;
+  --qb-text-secondary: #5f6870;
+  --qb-text-tertiary: #8d969f;
+
+  /* 分区与控件：均为半透明，透出面板材质 */
+  --qb-surface: rgba(42, 49, 59, .035);      /* 侧栏、工具栏、底栏等分区 */
+  --qb-surface-raised: rgba(255, 255, 255, .38); /* 输入框、卡片、次要按钮 */
+  --qb-surface-raised-hover: rgba(255, 255, 255, .6);
+  --qb-hover: rgba(42, 49, 59, .06);
+  --qb-pressed: rgba(42, 49, 59, .1);
+  --qb-selected: rgba(63, 127, 99, .16);     /* 列表选中行、分段控件选中项 */
+  --qb-border: rgba(42, 49, 59, .09);
+  --qb-border-strong: rgba(42, 49, 59, .17);
+  --qb-track: rgba(42, 49, 59, .18);          /* 开关、进度条的底轨 */
+
+  /* 主色：实色用于文字、图标、开关；浅色用于主要按钮与标签底色 */
+  --qb-accent: #3f7f63;
+  --qb-accent-text: #2f6a50;
+  --qb-accent-soft: rgba(63, 127, 99, .14);
+  --qb-accent-soft-hover: rgba(63, 127, 99, .22);
+  --qb-accent-border: rgba(63, 127, 99, .28);
+  --qb-on-accent: #fff;
+
+  /* 状态色 */
+  --qb-danger: #b83a3a;
+  --qb-danger-soft: rgba(184, 58, 58, .1);
+  --qb-danger-soft-hover: rgba(184, 58, 58, .17);
+  --qb-danger-border: rgba(184, 58, 58, .26);
+  --qb-warning: #8a6a2e;
+  --qb-warning-soft: rgba(196, 150, 60, .13);
+
+  /* 选中文字、焦点描边 */
+  --qb-selection: rgba(63, 127, 99, .22);
+  --qb-focus: rgba(63, 127, 99, .55);
+
+  /* 弹出层（确认框、设置浮层）：浮在内容之上，使用实色保证可读 */
+  --qb-popover: #fbfcfb;
+  --qb-popover-border: rgba(42, 49, 59, .12);
+  --qb-shadow: 0 12px 40px rgba(32, 47, 65, .14);
+  --qb-shadow-small: 0 1px 2px rgba(32, 47, 65, .14); /* 开关圆点、浮起的小控件 */
+  --qb-scrim: rgba(240, 244, 242, .25);
+
+  /* 圆角 */
+  --qb-radius: 8px;
+  --qb-radius-small: 6px;
+}
+
+:where(html, body) {
+  margin: 0;
+  background: transparent;
+  color: var(--qb-text);
+  font-family: var(--qb-font);
+  font-synthesis: none;
+  -webkit-font-smoothing: antialiased;
+}
+
+:where(button, input, textarea, select) { font: inherit; color: inherit; }
+:where(:focus-visible) { outline: 2px solid var(--qb-focus); outline-offset: 2px; }
+::selection { background: var(--qb-selection); }

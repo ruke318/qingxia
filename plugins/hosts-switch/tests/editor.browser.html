@@ -74,6 +74,10 @@
       const view = EditorView.findFromDOM(document.querySelector('[aria-label="分组 hosts 内容"]'));
       assert(document.querySelector('.group-row.selected')?.textContent.includes("开发环境"), "未恢复上次选中的分组");
       assert(view.state.selection.main.head === 8, `未恢复上次的光标位置：${view.state.selection.main.head}`);
+      // 颜色来自宿主主题变量：选中行为半透明主色，页面背景透明
+      const selected = win.getComputedStyle(document.querySelector('.group-row.selected')).backgroundColor;
+      assert(selected === "rgba(63, 127, 99, 0.16)", `选中行未使用主题变量 --qb-selected：${selected}`);
+      assert(win.getComputedStyle(document.querySelector(".hosts-plugin")).backgroundColor === "rgba(0, 0, 0, 0)", "插件根容器背景必须透明");
     }],
     ["⌘/ 注释与取消注释当前行", async () => {
       const content = document.querySelector('[aria-label="分组 hosts 内容"]');
