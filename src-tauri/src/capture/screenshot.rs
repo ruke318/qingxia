@@ -46,7 +46,17 @@ impl Snapshot {
                 .map(|data| data.to_vec())
                 .ok_or_else(|| "快照编码失败".to_string())
         });
-        crate::diag!("截图：显示器 {} 快照编码 {} 毫秒", self.display, started.elapsed().as_millis());
+        let image = &self.image.0;
+        let space = objc2_core_graphics::CGImage::color_space(Some(image))
+            .and_then(|space| objc2_core_graphics::CGColorSpace::name(Some(&space)))
+            .map(|name| name.to_string())
+            .unwrap_or_else(|| "未知".into());
+        crate::diag!(
+            "截图：显示器 {} 快照编码 {} 毫秒（{}×{}，每分量 {} 位，色彩 {space}）",
+            self.display, started.elapsed().as_millis(),
+            objc2_core_graphics::CGImage::width(Some(image)), objc2_core_graphics::CGImage::height(Some(image)),
+            objc2_core_graphics::CGImage::bits_per_component(Some(image)),
+        );
         result
     }
 
@@ -199,6 +209,8 @@ pub fn capture(done: impl FnOnce(Result<Vec<Snapshot>, String>) + Send + 'static
                 configuration.setWidth((rect.size.width * scale).round() as usize);
                 configuration.setHeight((rect.size.height * scale).round() as usize);
                 configuration.setShowsCursor(false);
+                // 统一输出 sRGB：外接广色域屏不必在编码时做色彩转换，导出颜色在各应用中一致
+                configuration.setColorSpaceName(objc2_core_graphics::kCGColorSpaceSRGB);
             }
             let collector = collector.clone();
             let completion = RcBlock::new(move |image: *mut CGImage, error: *mut NSError| {

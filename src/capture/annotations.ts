@@ -178,7 +178,8 @@ function waveAmplitude(size: Size) { return STROKE[size] * 1.2 + 2; }
 function drawWave(context: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, size: Size) {
   const length = Math.hypot(x2 - x1, y2 - y1);
   const amplitude = waveAmplitude(size);
-  const wavelength = STROKE[size] * 3 + 10;
+  // 一个完整起伏的长度：细 32、中 44、粗 56 逻辑点
+  const wavelength = STROKE[size] * 6 + 20;
   context.save();
   context.translate(x1, y1);
   context.rotate(Math.atan2(y2 - y1, x2 - x1));
