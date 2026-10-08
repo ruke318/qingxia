@@ -43,3 +43,5 @@ body { font-family: "SF Pro Text", "PingFang SC", -apple-system, sans-serif; -we
 .capture-toolbar .capture-done { padding: 0 9px; }
 /* 贴图窗口：图片铺满窗口，圆角与细边框 */
 .pin-image { display: block; width: 100vw; height: 100vh; box-sizing: border-box; border-radius: 6px; outline: 1px solid rgba(0, 0, 0, 0.18); outline-offset: -1px; cursor: grab; object-fit: fill; }
+/* 未框选时鼠标下窗口的高亮：与选区相同的遮罩挖空，不接收鼠标事件 */
+.capture-hover { position: absolute; box-sizing: border-box; border: 2px solid #65c7ff; border-radius: 6px; box-shadow: 0 0 0 10000px rgba(0, 0, 0, 0.28); background: rgba(101, 199, 255, 0.08); pointer-events: none; }

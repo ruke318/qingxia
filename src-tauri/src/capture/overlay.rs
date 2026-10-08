@@ -41,6 +41,8 @@ pub fn open(app: &AppHandle, session: u64) -> Result<usize, String> {
     let mouse = NSEvent::mouseLocation();
     let screens = NSScreen::screens(main_thread);
     let mut key_panel = None;
+    // 覆盖窗出现前取窗口列表，供未框选时吸附窗口
+    let windows = super::screenshot::window_list();
     for (index, screen) in screens.iter().enumerate() {
         let frame = screen.frame();
         let label = label(session, index);
@@ -54,6 +56,9 @@ pub fn open(app: &AppHandle, session: u64) -> Result<usize, String> {
         let scale = super::screenshot::info(session, display);
         let image = scale.map(|_| format!("\"qingbox-capture://localhost/{session}/{display}.png\"")).unwrap_or_else(|| "null".into());
         if scale.is_none() { crate::diag!("截图：显示器 {display} 没有快照，覆盖窗显示实时画面"); }
+        let bounds = objc2_core_graphics::CGDisplayBounds(display);
+        let local = super::screenshot::windows_on_screen(&windows, (bounds.origin.x, bounds.origin.y, bounds.size.width, bounds.size.height));
+        let windows_json = format!("[{}]", local.iter().map(|(x, y, w, h)| format!("[{x},{y},{w},{h}]")).collect::<Vec<_>>().join(","));
         let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("capture.html".into()))
             .title("轻匣截图")
             .decorations(false)
@@ -65,7 +70,7 @@ pub fn open(app: &AppHandle, session: u64) -> Result<usize, String> {
             .accept_first_mouse(true)
             .inner_size(frame.size.width, frame.size.height)
             .initialization_script(format!(
-                "window.__QINGBOX_CAPTURE__ = {{ session: {session}, screen: {index}, display: {display}, scale: {}, image: {image} }};",
+                "window.__QINGBOX_CAPTURE__ = {{ session: {session}, screen: {index}, display: {display}, scale: {}, image: {image}, windows: {windows_json} }};",
                 scale.unwrap_or_else(|| screen.backingScaleFactor()),
             ))
             .build()

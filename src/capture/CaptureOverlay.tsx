@@ -6,7 +6,7 @@ import { loadStyles, saveStyles, type ToolStyle, type ToolStyles } from "./style
 
 /** 宿主创建覆盖窗时注入：会话编号、屏幕序号、显示器编号、物理像素比例，以及本屏冻结快照的地址（没有快照时为 null）。 */
 declare global {
-  interface Window { __QINGBOX_CAPTURE__?: { session: number; screen: number; display?: number; scale?: number; image?: string | null } }
+  interface Window { __QINGBOX_CAPTURE__?: { session: number; screen: number; display?: number; scale?: number; image?: string | null; windows?: [number, number, number, number][] } }
 }
 
 type Point = { x: number; y: number };
@@ -29,6 +29,19 @@ const clamp = (value: number, maximum: number) => Math.max(0, Math.min(value, ma
 const pointOf = (event: { clientX: number; clientY: number }): Point => ({
   x: clamp(event.clientX, window.innerWidth), y: clamp(event.clientY, window.innerHeight),
 });
+
+/** 单击判定：按下到松开移动不超过这个距离视为单击，选中高亮的窗口。 */
+const CLICK_SLOP = 4;
+
+/** 鼠标所在的最上层窗口（窗口列表已按从前到后排列）；不在任何窗口上时为整块屏幕。 */
+export function windowAt(windows: [number, number, number, number][], point: Point, viewport = { width: window.innerWidth, height: window.innerHeight }): Rect {
+  const hit = windows.find(([x, y, width, height]) => point.x >= x && point.x < x + width && point.y >= y && point.y < y + height);
+  if (!hit) return { x: 0, y: 0, width: viewport.width, height: viewport.height };
+  // 窗口阴影等可能略超出屏幕，限制在本屏内
+  const [x, y, width, height] = hit;
+  const left = Math.max(0, x), top = Math.max(0, y);
+  return { x: left, y: top, width: Math.min(viewport.width, x + width) - left, height: Math.min(viewport.height, y + height) - top };
+}
 
 const TOOLBAR_HEIGHT = 38;
 const TOOLBAR_WIDTH = 540;
@@ -61,6 +74,12 @@ export function CaptureOverlay() {
   const context = window.__QINGBOX_CAPTURE__;
   const scale = context?.scale ?? window.devicePixelRatio ?? 1;
   const [selection, setSelection] = useState<Rect | null>(null);
+  // 未框选时鼠标所在窗口的高亮区域，单击即选中
+  const [hover, setHover] = useState<Rect | null>(null);
+  const hoverRef = useRef<Rect | null>(null);
+  hoverRef.current = hover;
+  const selectionRef = useRef<Rect | null>(null);
+  selectionRef.current = selection;
   const [dragging, setDragging] = useState(false);
   const [busy, setBusy] = useState<"copy" | "save" | "pin" | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -248,7 +267,15 @@ export function CaptureOverlay() {
     function update(event: MouseEvent) {
       if (updateStroke(event)) return;
       const current = drag.current;
-      if (!current) return;
+      if (!current) {
+        // 还没有选区：高亮鼠标下的窗口
+        if (!selectionRef.current) {
+          const next = windowAt(context?.windows ?? [], pointOf(event));
+          const previous = hoverRef.current;
+          if (!previous || previous.x !== next.x || previous.y !== next.y || previous.width !== next.width || previous.height !== next.height) setHover(next);
+        }
+        return;
+      }
       const point = pointOf(event);
       if (current.kind === "move") {
         const { original, start } = current;
@@ -273,11 +300,21 @@ export function CaptureOverlay() {
     }
     function end(event?: MouseEvent) {
       if (endStroke(event)) return;
-      if (!drag.current) return;
+      const current = drag.current;
+      if (!current) return;
       if (event) update(event);
       drag.current = null;
       setDragging(false);
+      // 新建选区时几乎没有移动：视为单击，选中高亮的窗口（或整屏）
+      const click = current.kind === "draw" && (!event || Math.hypot(event.clientX - current.start.x, event.clientY - current.start.y) <= CLICK_SLOP);
+      if (click) {
+        const target = hoverRef.current ?? (event ? windowAt(context?.windows ?? [], pointOf(event)) : null);
+        setSelection(event ? target : null);
+        setHover(null);
+        return;
+      }
       setSelection((rect) => rect && rect.width >= 2 && rect.height >= 2 ? rect : null);
+      setHover(null);
     }
     function blur() { end(); }
     function handleKey(event: KeyboardEvent) {
@@ -374,14 +411,23 @@ export function CaptureOverlay() {
   }
 
   const visible = selection && selection.width > 0 && selection.height > 0;
+  const highlight = !visible && !dragging ? hover : null;
   const toolbar = visible ? toolbarPosition(selection) : null;
   // 工具栏贴近屏幕底部时，颜色与粗细面板放到工具栏上方
   const panelAbove = toolbar ? toolbar.top + TOOLBAR_HEIGHT + 46 > window.innerHeight : false;
   return (
     <>
     {context?.image && <img className="capture-snapshot" src={context.image} alt="" draggable={false} onLoad={() => { if (isTauri()) void invoke("capture_ready", { session: context.session }); }} />}
-    <main className={`capture-overlay${visible ? " has-selection" : ""}`} aria-label="截图" onMouseDown={(event) => begin(event, "draw")}>
-      <p className="capture-hint">{visible ? (tool ? "按住 ⇧ 吸附角度 · ⌘Z 撤销 · 回车复制" : "回车复制 · ⌘S 保存 · Esc 取消") : "拖动选择区域 · Esc 取消"}</p>
+    <main className={`capture-overlay${visible || highlight ? " has-selection" : ""}`} aria-label="截图" onMouseDown={(event) => begin(event, "draw")}>
+      <p className="capture-hint">{visible ? (tool ? "按住 ⇧ 吸附角度 · ⌘Z 撤销 · 回车复制" : "回车复制 · ⌘S 保存 · Esc 取消") : "单击选择窗口 · 拖动框选区域 · Esc 取消"}</p>
+      {highlight && (
+        <>
+          <div className="capture-hover" aria-label="窗口高亮" style={{ left: highlight.x, top: highlight.y, width: highlight.width, height: highlight.height }} />
+          <output className="capture-size" aria-label="选区尺寸" style={{ left: clamp(highlight.x + 4, window.innerWidth - 130), top: highlight.y >= 32 ? highlight.y - 30 : highlight.y + 8 }}>
+            {Math.round(highlight.width * scale)} × {Math.round(highlight.height * scale)}
+          </output>
+        </>
+      )}
       {visible && (
         <>
           <div className={`capture-selection${locked ? " locked" : ""}${tool === "text" ? " text-tool" : ""}`} aria-label="截图选区" style={{ left: selection.x, top: selection.y, width: selection.width, height: selection.height }}

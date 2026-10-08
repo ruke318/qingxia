@@ -132,6 +132,50 @@ pub fn serve(webview_label: &str, path: &str) -> tauri::http::Response<Vec<u8>> 
     }
 }
 
+/// 矩形：x、y、宽、高。
+pub type Frame = (f64, f64, f64, f64);
+
+/// 屏幕上的普通窗口（层级 0），按从前到后排列，坐标为全局逻辑点（主屏左上角为原点）。排除轻匣自身与过小的窗口。
+#[cfg(target_os = "macos")]
+pub fn window_list() -> Vec<Frame> {
+    use objc2::runtime::AnyObject;
+    use objc2_core_graphics::{CGWindowListCopyWindowInfo, CGWindowListOption};
+    use objc2_foundation::{NSArray, NSDictionary, NSNumber, NSString};
+    let options = CGWindowListOption::OptionOnScreenOnly | CGWindowListOption::ExcludeDesktopElements;
+    let Some(array) = CGWindowListCopyWindowInfo(options, 0) else { return Vec::new() };
+    // CFArray、CFDictionary 与 NSArray、NSDictionary 免费桥接
+    let array: &NSArray<NSDictionary<NSString, AnyObject>> = unsafe { &*(objc2_core_foundation::CFRetained::as_ptr(&array).as_ptr() as *const _) };
+    let number = |dictionary: &NSDictionary<NSString, AnyObject>, key: &str| {
+        dictionary.objectForKey(&NSString::from_str(key)).and_then(|value| value.downcast::<NSNumber>().ok()).map(|value| value.doubleValue())
+    };
+    let own = f64::from(std::process::id());
+    let mut windows = Vec::new();
+    for info in array.iter() {
+        if number(&info, "kCGWindowLayer") != Some(0.0) || number(&info, "kCGWindowOwnerPID") == Some(own) { continue }
+        if number(&info, "kCGWindowAlpha").is_some_and(|alpha| alpha <= 0.0) { continue }
+        let Some(bounds) = info.objectForKey(&NSString::from_str("kCGWindowBounds")).and_then(|value| value.downcast::<NSDictionary>().ok()) else { continue };
+        let bounds: &NSDictionary<NSString, AnyObject> = unsafe { &*(objc2::rc::Retained::as_ptr(&bounds) as *const _) };
+        let (Some(x), Some(y), Some(width), Some(height)) = (number(bounds, "X"), number(bounds, "Y"), number(bounds, "Width"), number(bounds, "Height")) else { continue };
+        if width >= 20.0 && height >= 20.0 { windows.push((x, y, width, height)); }
+    }
+    windows
+}
+
+#[cfg(not(target_os = "macos"))]
+pub fn window_list() -> Vec<Frame> { Vec::new() }
+
+/// 把全局窗口换算到某块屏幕的本地坐标（屏幕左上角为原点），只保留与该屏相交的部分，顺序不变。
+pub fn windows_on_screen(windows: &[Frame], screen: Frame) -> Vec<Frame> {
+    let (sx, sy, sw, sh) = screen;
+    windows.iter().filter_map(|&(x, y, width, height)| {
+        let left = x.max(sx);
+        let top = y.max(sy);
+        let right = (x + width).min(sx + sw);
+        let bottom = (y + height).min(sy + sh);
+        (right - left >= 4.0 && bottom - top >= 4.0).then(|| (left - sx, top - sy, right - left, bottom - top))
+    }).collect()
+}
+
 type Done = Box<dyn FnOnce(Result<Vec<Snapshot>, String>) + Send>;
 
 /// 收集各显示器的截图结果，全部完成后回调一次。
@@ -242,6 +286,14 @@ pub fn capture(done: impl FnOnce(Result<Vec<Snapshot>, String>) + Send + 'static
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 窗口按屏幕裁剪并换算为本地坐标() {
+        // 副屏位于主屏右侧、略高：全局原点 (1440, -100)，1920×1080
+        let screen = (1440.0, -100.0, 1920.0, 1080.0);
+        let windows = [(100.0, 100.0, 800.0, 600.0), (1300.0, 0.0, 400.0, 300.0), (1600.0, 50.0, 500.0, 400.0)];
+        assert_eq!(windows_on_screen(&windows, screen), vec![(0.0, 100.0, 260.0, 300.0), (160.0, 150.0, 500.0, 400.0)], "不相交的窗口被排除，跨屏窗口只取本屏部分，顺序保持从前到后");
+    }
 
     #[test]
     fn 资源路径解析会话与显示器() {

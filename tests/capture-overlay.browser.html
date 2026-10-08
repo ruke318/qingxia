@@ -69,14 +69,14 @@
         expectRect(100, 120, 200, 160);
         assert(document.querySelector('[aria-label="选区尺寸"]').textContent === "400 × 320", "尺寸提示应为物理像素（2 倍）");
       }],
-      ["松开时使用最终位置，单击不留下零尺寸选区", async () => {
+      ["松开时使用最终位置，单击空白处选中整屏", async () => {
         overlay().dispatchEvent(new MouseEvent("mousedown", { clientX: 100, clientY: 120, buttons: 1, bubbles: true }));
         window.dispatchEvent(new MouseEvent("mouseup", { clientX: 300, clientY: 280, bubbles: true }));
         await pause();
         expectRect(100, 120, 200, 160);
         await reset();
-        await drag(overlay(), [100, 100], [100, 100]);
-        assert(!selection(), "单击不应留下零尺寸选区");
+        await drag(overlay(), [100, 100], [102, 101]);
+        expectRect(0, 0, innerWidth, innerHeight);
       }],
       ["拖动选区移动并限制在本屏范围内", async () => {
         await drag(overlay(), [100, 120], [300, 280]);
@@ -311,6 +311,33 @@
         assert(broken.rect.color === "#e5484d" && broken.rect.size === 1 && broken.cover.color === "#1f2328", "损坏时回到默认样式");
         const partial = loadStyles({ getItem: () => JSON.stringify({ rect: { color: "#3b82f6", size: 9 }, line: { wavy: true } }) });
         assert(partial.rect.color === "#3b82f6" && partial.rect.size === 1 && partial.line.wavy, "只采用有效的字段");
+      }],
+      ["未框选时高亮鼠标下最上层的窗口，单击选中", async () => {
+        const context = window.__QINGBOX_CAPTURE__;
+        // 窗口列表从前到后：小窗口叠在大窗口上
+        context.windows = [[150, 100, 300, 200], [100, 80, 600, 400]];
+        try {
+          await reset();
+          window.dispatchEvent(new MouseEvent("mousemove", { clientX: 200, clientY: 150, bubbles: true }));
+          await pause();
+          const hover = () => document.querySelector('[aria-label="窗口高亮"]')?.getBoundingClientRect();
+          assert(hover() && hover().x === 150 && hover().width === 300, "应高亮最上层的小窗口");
+          assert(document.querySelector('[aria-label="选区尺寸"]').textContent === "600 × 400", "高亮时显示窗口的物理像素尺寸");
+          await drag(overlay(), [200, 150], [200, 150]);
+          expectRect(150, 100, 300, 200);
+          assert(!document.querySelector('[aria-label="窗口高亮"]'), "选中后不再高亮");
+          await reset();
+          window.dispatchEvent(new MouseEvent("mousemove", { clientX: 650, clientY: 450, bubbles: true }));
+          await pause();
+          await drag(overlay(), [650, 450], [650, 450]);
+          expectRect(100, 80, 600, 400);
+          await reset();
+          await drag(overlay(), [900, 700], [900, 700]);
+          expectRect(0, 0, innerWidth, innerHeight);
+          await reset();
+          await drag(overlay(), [200, 150], [260, 200]);
+          expectRect(200, 150, 60, 50);
+        } finally { delete context.windows; }
       }],
       ["箭头按住 ⇧ 吸附到 45°", async () => {
         const { snapAngle } = await import("../src/capture/annotations.ts");
