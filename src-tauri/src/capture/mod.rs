@@ -2,6 +2,8 @@
 //!
 //! 同一时刻只有一个会话，按下快捷键或在搜索框选“截图”都调用 [`start_screenshot`]。
 //! 每个会话有递增编号，异步回调携带编号推进状态，会话已取消或被新会话取代时，迟到的回调直接丢弃。
+pub mod permission;
+
 use std::sync::Mutex;
 
 use tauri::{AppHandle, Manager, Webview};
@@ -130,6 +132,17 @@ pub fn start_screenshot(app: &AppHandle) -> Result<(), String> {
         return Ok(());
     };
     crate::diag!("截图：会话 {id} 开始");
+    // 未授权时结束会话，唤起主面板说明原因。
+    let access = match permission::ensure(app) {
+        Ok(access) => access,
+        Err(error) => { state.advance(id, Event::Fail)?; return Err(error) }
+    };
+    if let Some(notice) = access.notice() {
+        state.advance(id, Event::Cancel)?;
+        crate::diag!("截图：会话 {id} 结束（未授权）");
+        crate::show_launcher_with(app, Some(notice));
+        return Ok(());
+    }
     // 先收起主面板，快照中不能出现轻匣自身。
     if let Some(window) = app.get_window("main") {
         if window.is_visible().unwrap_or(false) { crate::hide_panel(&window, "开始截图")?; }

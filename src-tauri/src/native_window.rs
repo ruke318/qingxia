@@ -348,7 +348,8 @@ fn mouse_screen(main_thread: MainThreadMarker) -> Option<Retained<NSScreen>> {
     screens.iter().find(|screen| contains(screen.frame(), mouse)).or_else(|| screens.iter().next())
 }
 
-pub fn present(window: &Window, height: f64, event: &'static str) -> Result<(), String> {
+/// `notice` 随事件一起发给主页面（唤起时显示的提示），没有时为 `null`。
+pub fn present(window: &Window, height: f64, event: &'static str, notice: Option<String>) -> Result<(), String> {
     on_main_thread(window, move |target, native, main_thread| {
         let mouse = NSEvent::mouseLocation();
         let Some(screen) = mouse_screen(main_thread) else {
@@ -367,7 +368,7 @@ pub fn present(window: &Window, height: f64, event: &'static str) -> Result<(), 
             centered_x(screen.frame(), actual.size.width),
             actual.origin.y,
         ));
-        let _ = target.emit(event, ());
+        let _ = target.emit(event, notice);
         settle_later(target);
         log_presented(native, main_thread, event, Some((mouse.x, mouse.y)));
     })

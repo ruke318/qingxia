@@ -64,6 +64,9 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
   const [items, setItems] = useState<SearchResult[]>([]);
   const [commands, setCommands] = useState<PluginCommand[]>([]);
   const [notice, setNotice] = useState<string | null>(null);
+  // 宿主随唤起附带的提示，独立于查询结果的提示，用户开始输入时清除
+  const [hostNotice, setHostNotice] = useState<string | null>(null);
+  const shownNotice = hostNotice ?? notice;
   const [activeIndex, setActiveIndex] = useState(0);
   const [noticeHeight, setNoticeHeight] = useState(0);
   const requestRef = useRef(0);
@@ -86,8 +89,9 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
   useEffect(() => {
     let cancelled = false;
     let unlisten: (() => void) | undefined;
-    void onLauncherFocus(() => {
+    void onLauncherFocus((message) => {
       if (cancelled) return;
+      setHostNotice(message);
       requestRef.current = nextQueryRequestId();
       // 保留搜索内容，每次唤起仍刷新查询，避免同词重开时沿用过期请求。
       flushSync(() => {
@@ -155,14 +159,14 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
     setNoticeHeight(element.offsetHeight);
     observer.observe(element);
     return () => observer.disconnect();
-  }, [notice]);
+  }, [shownNotice]);
 
   useEffect(() => {
     if (view !== "launcher") { void resizeLauncher(670); return; }
     if (isComposing) return;
-    const expanded = items.length > 0 || notice !== null;
-    void resizeLauncher(60 + Math.min(items.length, 8) * 58 + (expanded ? 32 : 0) + (notice ? Math.max(noticeHeight, 34) : 0));
-  }, [items.length, notice, noticeHeight, isComposing, view, activation]);
+    const expanded = items.length > 0 || shownNotice !== null;
+    void resizeLauncher(60 + Math.min(items.length, 8) * 58 + (expanded ? 32 : 0) + (shownNotice ? Math.max(noticeHeight, 34) : 0));
+  }, [items.length, shownNotice, noticeHeight, isComposing, view, activation]);
 
   useEffect(() => {
     resultsRef.current?.querySelector<HTMLElement>(".result-row.active")?.scrollIntoView({ block: "nearest" });
@@ -238,19 +242,19 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
         });
       }}>
         <span className="search-icon" title="按住拖动窗口" aria-hidden="true"><svg viewBox="0 0 24 24" fill="none"><circle cx="10.5" cy="10.5" r="6.5" /><path d="m15.5 15.5 5 5" /></svg></span>
-        <input ref={inputRef} autoFocus autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} value={query} onChange={(event) => { if (view !== "launcher") onReturn(); setQuery(event.target.value); }} onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd} onKeyDown={handleKeyDown} placeholder="搜索插件、应用、文件或目录…" aria-label="搜索应用、文件或目录" role="combobox" aria-autocomplete="list" aria-controls={view === "launcher" && items.length ? "search-results" : undefined} aria-expanded={view === "launcher" && items.length > 0} aria-activedescendant={view === "launcher" && items.length ? `result-${activeIndex}` : undefined} />
+        <input ref={inputRef} autoFocus autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} value={query} onChange={(event) => { if (view !== "launcher") onReturn(); setHostNotice(null); setQuery(event.target.value); }} onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd} onKeyDown={handleKeyDown} placeholder="搜索插件、应用、文件或目录…" aria-label="搜索应用、文件或目录" role="combobox" aria-autocomplete="list" aria-controls={view === "launcher" && items.length ? "search-results" : undefined} aria-expanded={view === "launcher" && items.length > 0} aria-activedescendant={view === "launcher" && items.length ? `result-${activeIndex}` : undefined} />
         <button className="settings-trigger" onClick={() => { void openSettings(); onSettings(); }} aria-label="设置" aria-expanded={view === "settings"}>⌘,</button>
       </div>
       {view === "settings" && <div className="content-area"><SettingsPanel onClose={onReturn} /></div>}
       {(view === "plugin" || plugin) && <div className="content-area plugin-content" aria-label="插件内容区域" hidden={view !== "plugin"}>
         {plugin && <PluginFrame key={plugin.token} token={plugin.token} url={plugin.url} command={plugin.command} shown={plugin.shown} />}
       </div>}
-      {view === "launcher" && (items.length > 0 || notice) && (
+      {view === "launcher" && (items.length > 0 || shownNotice) && (
         <div className="results-panel">
           {items.length > 0 && <div className="results" ref={resultsRef} id="search-results" role="listbox" aria-label="搜索结果">
             {items.map((item, index) => <ResultRow key={`${item.path}-${index}`} item={item} index={index} active={index === activeIndex} onClick={() => void execute(item)} />)}
           </div>}
-          {notice && <p ref={noticeRef} className="search-notice" role="status">{notice}</p>}
+          {shownNotice && <p ref={noticeRef} className="search-notice" role="status">{shownNotice}</p>}
           <div className="result-footer">
             {items.length > 0 && <><span>↑ ↓ 选择</span><span>↵ 打开</span>{items[activeIndex]?.kind !== "plugin" && <span>⌘↵ 访达</span>}{items[activeIndex]?.kind === "directory" && <span>Tab 补全</span>}</>}
             <span className="footer-escape">Esc 隐藏</span>

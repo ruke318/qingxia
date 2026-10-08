@@ -81,9 +81,10 @@ export async function closeSettings(): Promise<void> {
 
 }
 
-export async function onLauncherFocus(callback: () => void): Promise<() => void> {
+/** 唤起主入口；载荷为宿主附带的提示（如截图缺少权限），没有时为 `null`。 */
+export async function onLauncherFocus(callback: (notice: string | null) => void): Promise<() => void> {
   if (!isDesktop) return () => {};
-  return listen("launcher-focus", callback);
+  return listen<string | null>("launcher-focus", (event) => callback(event.payload ?? null));
 }
 
 export async function onShowSettings(callback: () => void): Promise<() => void> {

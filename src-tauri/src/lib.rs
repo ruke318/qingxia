@@ -55,12 +55,17 @@ fn position_launcher(window: &Window, height: f64) -> tauri::Result<()> {
 }
 
 fn show_launcher(app: &AppHandle) {
+    show_launcher_with(app, None);
+}
+
+/// 唤起主入口并在结果区显示一条提示（如截图缺少权限）；提示随唤起事件一起送达，不会被查询刷新清掉。
+fn show_launcher_with(app: &AppHandle, notice: Option<&str>) {
     shortcuts::stop_recording();
     plugins::hide_active(app);
     if let Some(view) = app.get_webview("main") { let _ = view.set_focus(); }
     if let Some(window) = app.get_window("main") {
         #[cfg(target_os = "macos")]
-        if let Err(error) = native_window::present(&window, LAUNCHER_HEIGHT, "launcher-focus") {
+        if let Err(error) = native_window::present(&window, LAUNCHER_HEIGHT, "launcher-focus", notice.map(str::to_string)) {
             diag!("唤起主入口失败：{error}");
         }
         #[cfg(not(target_os = "macos"))]
@@ -68,7 +73,7 @@ fn show_launcher(app: &AppHandle) {
             let _ = position_launcher(&window, LAUNCHER_HEIGHT);
             let _ = window.show();
             let _ = window.set_focus();
-            let _ = window.emit("launcher-focus", ());
+            let _ = window.emit("launcher-focus", notice);
         }
     }
 }
@@ -94,7 +99,7 @@ fn show_settings(app: &AppHandle) {
     if let Some(view) = app.get_webview("main") { let _ = view.set_focus(); }
     if let Some(window) = app.get_window("main") {
         #[cfg(target_os = "macos")]
-        if let Err(error) = native_window::present(&window, 670.0, "show-settings") {
+        if let Err(error) = native_window::present(&window, 670.0, "show-settings", None) {
             diag!("打开设置失败：{error}");
         }
         #[cfg(not(target_os = "macos"))]
