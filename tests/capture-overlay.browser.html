@@ -43,6 +43,20 @@
       window.dispatchEvent(new MouseEvent("mouseup", { clientX: to[0], clientY: to[1], button: 0, bubbles: true }));
       await pause();
     }
+    const tool = (name) => document.querySelector(`[aria-label="截图操作"] [aria-label="${name}"]`);
+    /** 回车导出并解码结果，返回可取像素的画布上下文。 */
+    async function exported() {
+      calls.length = 0;
+      window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+      const deadline = Date.now() + 3000;
+      while (!calls.some((call) => call.command === "capture_export") && Date.now() < deadline) await pause();
+      const call = calls.find((call) => call.command === "capture_export");
+      if (!call) throw new Error("没有导出");
+      const image = await createImageBitmap(new Blob([call.args], { type: "image/png" }));
+      const context = Object.assign(document.createElement("canvas"), { width: image.width, height: image.height }).getContext("2d");
+      context.drawImage(image, 0, 0);
+      return context;
+    }
     function expectRect(x, y, width, height) {
       assert(selection(), "拖拽后没有出现选区");
       const rect = selection().getBoundingClientRect();
@@ -171,6 +185,73 @@
         assert(toolbarPosition({ x: 100, y: 100, width: 200, height: 100 }, viewport).top === 208, "默认放在选区下方");
         assert(toolbarPosition({ x: 100, y: 300, width: 200, height: 480 }, viewport).top === 254, "下方放不下时放上方");
         assert(toolbarPosition({ x: 0, y: 10, width: 1000, height: 780 }, viewport).top === 744, "上下都放不下时放在选区内底部");
+      }],
+      ["选择工具后锁定选区，画矩形并可撤销重做", async () => {
+        await drag(overlay(), [50, 50], [250, 200]);
+        tool("矩形").click();
+        await pause();
+        assert(!document.querySelector('[aria-label="调整选区：右下角"]'), "选择工具后不能再调整选区");
+        await drag(selection(), [60, 60], [140, 120]);
+        assert(!document.querySelector('[aria-label="撤销"]').disabled, "画完后可以撤销");
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, bubbles: true, cancelable: true }));
+        await pause();
+        assert(document.querySelector('[aria-label="撤销"]').disabled && !document.querySelector('[aria-label="重做"]').disabled, "⌘Z 撤销后可以重做");
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "z", metaKey: true, shiftKey: true, bubbles: true, cancelable: true }));
+        await pause();
+        const pixels = await exported();
+        const [r, g, b] = pixels.getImageData((60 - 50) * 2, (90 - 50) * 2, 1, 1).data;
+        assert(r > 180 && g < 120 && b < 120, `矩形边框应导出为红色，实际 ${r},${g},${b}`);
+        const [, , blue] = pixels.getImageData((200 - 50) * 2, (180 - 50) * 2, 1, 1).data;
+        assert(blue > 200, "矩形以外保持原画面");
+      }],
+      ["马赛克在导出结果中改写像素", async () => {
+        await drag(overlay(), [50, 50], [250, 200]);
+        tool("马赛克").click();
+        await pause();
+        assert(!document.querySelector('[aria-label="颜色 #e5484d"]'), "马赛克不需要颜色");
+        await drag(selection(), [85, 85], [125, 125]);
+        const [r, , b] = (await exported()).getImageData((100 - 50) * 2, (100 - 50) * 2, 1, 1).data;
+        assert(r > 60 && b > 60, `红蓝交界处应被马赛克混合，实际 ${r},${b}`);
+      }],
+      ["步骤序号依次放置，选中删除后可撤销", async () => {
+        await drag(overlay(), [50, 50], [450, 300]);
+        tool("步骤序号").click();
+        await pause();
+        for (const x of [120, 200, 280]) await drag(selection(), [x, 150], [x, 150]);
+        await drag(selection(), [200, 150], [200, 150]);
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Backspace", bubbles: true, cancelable: true }));
+        await pause();
+        const { stepNumber } = await import("../src/capture/annotations.ts");
+        const items = [{ kind: "step", id: 1 }, { kind: "rect", id: 2 }, { kind: "step", id: 4 }];
+        assert(stepNumber(items, 1) === 1 && stepNumber(items, 4) === 2, "删除中间序号后其余自动重排");
+        assert(!document.querySelector('[aria-label="撤销"]').disabled, "删除可以撤销");
+      }],
+      ["文字工具：回车确认，Esc 只退出输入不取消截图", async () => {
+        await drag(overlay(), [50, 50], [450, 300]);
+        tool("文字").click();
+        await pause();
+        await drag(selection(), [100, 100], [100, 100]);
+        const field = () => document.querySelector('[aria-label="标注文字"]');
+        assert(field(), "点击后出现文字输入框");
+        const setter = Object.getOwnPropertyDescriptor(HTMLTextAreaElement.prototype, "value").set;
+        setter.call(field(), "说明");
+        field().dispatchEvent(new Event("input", { bubbles: true }));
+        field().dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        await pause();
+        assert(!field(), "回车确认后关闭输入框");
+        assert(!calls.some((call) => call.command === "capture_export"), "输入框里的回车不能触发复制");
+        await drag(selection(), [300, 200], [300, 200]);
+        field().dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        await pause();
+        assert(!field() && !calls.some((call) => call.command === "capture_cancel"), "输入框里的 Esc 只退出输入");
+        assert(!document.querySelector('[aria-label="撤销"]').disabled, "确认的文字可以撤销");
+      }],
+      ["箭头按住 ⇧ 吸附到 45°", async () => {
+        const { snapAngle } = await import("../src/capture/annotations.ts");
+        const [x, y] = snapAngle(0, 0, 100, 90);
+        assert(Math.abs(x - y) < 0.001, "接近 45° 时吸附到 45°");
+        const [hx, hy] = snapAngle(0, 0, 100, 10);
+        assert(Math.abs(hy) < 0.001 && hx > 99, "接近水平时吸附到水平");
       }],
     ];
     const result = { passed: 0, total: scenarios.length, failures: [] };

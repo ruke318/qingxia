@@ -4,9 +4,9 @@ body { font-family: "SF Pro Text", "PingFang SC", -apple-system, sans-serif; -we
 .capture-snapshot { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
 .capture-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.28); cursor: crosshair; }
 .capture-overlay.has-selection { background: transparent; }
-.capture-hint { position: absolute; z-index: 1; top: 24px; left: 50%; margin: 0; padding: 8px 14px; border-radius: 8px; color: #fff; background: rgba(0, 0, 0, 0.55); font-size: 13px; transform: translateX(-50%); pointer-events: none; }
+.capture-hint { position: absolute; z-index: 2; top: 24px; left: 50%; margin: 0; padding: 8px 14px; border-radius: 8px; color: #fff; background: rgba(0, 0, 0, 0.55); font-size: 13px; transform: translateX(-50%); pointer-events: none; }
 .capture-selection { position: absolute; box-sizing: border-box; border: 1px solid #65c7ff; box-shadow: 0 0 0 10000px rgba(0, 0, 0, 0.28); cursor: move; }
-.capture-size { position: absolute; z-index: 1; padding: 4px 8px; border-radius: 4px; color: #fff; background: rgba(0, 0, 0, 0.7); font-size: 12px; white-space: nowrap; pointer-events: none; }
+.capture-size { position: absolute; z-index: 2; padding: 4px 8px; border-radius: 4px; color: #fff; background: rgba(0, 0, 0, 0.7); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .capture-handle { position: absolute; width: 10px; height: 10px; box-sizing: border-box; border: 1px solid #65c7ff; background: #fff; transform: translate(-50%, -50%); }
 .capture-handle-nw { left: 0; top: 0; cursor: nwse-resize; }
 .capture-handle-n { left: 50%; top: 0; cursor: ns-resize; }
@@ -16,7 +16,7 @@ body { font-family: "SF Pro Text", "PingFang SC", -apple-system, sans-serif; -we
 .capture-handle-s { left: 50%; top: 100%; cursor: ns-resize; }
 .capture-handle-sw { left: 0; top: 100%; cursor: nesw-resize; }
 .capture-handle-w { left: 0; top: 50%; cursor: ew-resize; }
-.capture-toolbar { position: absolute; z-index: 2; display: flex; align-items: center; gap: 2px; height: 38px; padding: 0 4px; box-sizing: border-box; border-radius: 9px; background: rgba(250, 251, 250, 0.96); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28), 0 0 0 0.5px rgba(0, 0, 0, 0.12); cursor: default; }
+.capture-toolbar { position: absolute; z-index: 4; display: flex; align-items: center; gap: 2px; height: 38px; padding: 0 4px; box-sizing: border-box; border-radius: 9px; background: rgba(250, 251, 250, 0.96); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28), 0 0 0 0.5px rgba(0, 0, 0, 0.12); cursor: default; }
 .capture-toolbar button { display: flex; align-items: center; gap: 4px; height: 30px; min-width: 30px; padding: 0 7px; border: 0; border-radius: 6px; color: #262b31; background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
 .capture-toolbar button:hover:not(:disabled) { background: rgba(42, 49, 59, 0.08); }
 .capture-toolbar button:disabled { cursor: default; opacity: 0.5; }
@@ -24,3 +24,17 @@ body { font-family: "SF Pro Text", "PingFang SC", -apple-system, sans-serif; -we
 .capture-toolbar .capture-done { color: #fff; background: #3f7f63; padding: 0 10px; }
 .capture-toolbar .capture-done:hover:not(:disabled) { background: #356c54; }
 .capture-error { position: absolute; top: 100%; right: 0; margin: 6px 0 0; padding: 6px 10px; border-radius: 6px; color: #fff; background: rgba(184, 58, 58, 0.95); font-size: 12px; white-space: nowrap; }
+.capture-selection.locked { cursor: crosshair; }
+.capture-selection.text-tool { cursor: text; }
+/* 标注预览：铺满本屏、只在选区内绘制，不接收鼠标事件 */
+.capture-annotations { position: fixed; inset: 0; z-index: 1; width: 100%; height: 100%; pointer-events: none; }
+.capture-text { position: absolute; z-index: 3; margin: 0; padding: 0; border: 1px dashed rgba(101, 199, 255, 0.9); outline: none; background: transparent; line-height: 1.3; resize: none; overflow: hidden; white-space: pre; }
+.capture-toolbar button[aria-pressed="true"] { color: #2f6a50; background: rgba(63, 127, 99, 0.16); }
+.capture-toolbar svg .filled { fill: currentColor; stroke: none; }
+.capture-separator { width: 1px; height: 18px; margin: 0 3px; background: rgba(42, 49, 59, 0.15); }
+.capture-style { position: absolute; top: calc(100% + 6px); left: 0; display: flex; align-items: center; gap: 4px; height: 34px; padding: 0 8px; border-radius: 8px; background: rgba(250, 251, 250, 0.96); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28), 0 0 0 0.5px rgba(0, 0, 0, 0.12); }
+.capture-style.above { top: auto; bottom: calc(100% + 6px); }
+.capture-toolbar .capture-color { width: 20px; min-width: 20px; height: 20px; padding: 0; border-radius: 50%; box-shadow: inset 0 0 0 1px rgba(0, 0, 0, 0.18); }
+.capture-toolbar .capture-color[aria-pressed="true"] { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px #3f7f63; }
+.capture-toolbar .capture-size-option { justify-content: center; width: 26px; min-width: 26px; padding: 0; }
+.capture-size-option span { display: block; border-radius: 50%; background: currentColor; }
