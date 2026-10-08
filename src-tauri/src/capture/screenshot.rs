@@ -87,6 +87,13 @@ pub fn serve(webview_label: &str, path: &str) -> tauri::http::Response<Vec<u8>> 
             .body(body)
             .expect("构造截图资源响应失败")
     };
+    // 贴图图片：/pin/<编号>.png，只交给对应的贴图窗口
+    if let Some(id) = path.strip_prefix("/pin/").and_then(|file| file.strip_suffix(".png")).and_then(|id| id.parse().ok()) {
+        return match super::pin::image(webview_label, id) {
+            Some(png) => respond(200, "image/png", png.as_ref().clone()),
+            None => respond(403, "text/plain", Vec::new()),
+        };
+    }
     let Some((session, display)) = parse_path(path) else { return respond(404, "text/plain", Vec::new()) };
     if super::overlay::session_of(webview_label) != Some(session) { return respond(403, "text/plain", Vec::new()) }
     let snapshot = STORE.lock().ok().and_then(|store| {

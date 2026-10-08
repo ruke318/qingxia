@@ -2,6 +2,7 @@ import { useEffect, useLayoutEffect, useRef, useState, type MouseEvent as ReactM
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { loadImage, renderSelection } from "./export";
 import { bounds, COLORS, drawAnnotations, FONT, hitTest, normalize, snapAngle, TEXT_FONT_FAMILY, translate, type Annotation, type Size, type Tool } from "./annotations";
+import { loadStyles, saveStyles, type ToolStyle, type ToolStyles } from "./styles";
 
 /** 宿主创建覆盖窗时注入：会话编号、屏幕序号、显示器编号、物理像素比例，以及本屏冻结快照的地址（没有快照时为 null）。 */
 declare global {
@@ -30,7 +31,7 @@ const pointOf = (event: { clientX: number; clientY: number }): Point => ({
 });
 
 const TOOLBAR_HEIGHT = 38;
-const TOOLBAR_WIDTH = 470;
+const TOOLBAR_WIDTH = 540;
 const GAP = 8;
 
 /** 工具栏位置：默认在选区下方右对齐；下方放不下放上方，上下都放不下放在选区内底部。 */
@@ -45,6 +46,7 @@ export function toolbarPosition(rect: Rect, viewport = { width: window.innerWidt
 
 const TOOLS: [Tool, string, ReactNode][] = [
   ["rect", "矩形", <rect key="i" x="3.5" y="5" width="13" height="10" rx="1" />],
+  ["line", "直线", <path key="i" d="M3.5 13.5c2-3 3.5-3 5 0s3 3 4.5 0 2.5-3 3.5-1" />],
   ["arrow", "箭头", <path key="i" d="M4.5 15.5L15 5M9.5 5H15v5.5" />],
   ["pen", "画笔", <path key="i" d="M4 15c2.5-.5 3.5-6 6.5-7s3 3.5 5.5 2.5" />],
   ["text", "文字", <path key="i" d="M5 5h10M10 5v11M8 16h4" />],
@@ -60,11 +62,11 @@ export function CaptureOverlay() {
   const scale = context?.scale ?? window.devicePixelRatio ?? 1;
   const [selection, setSelection] = useState<Rect | null>(null);
   const [dragging, setDragging] = useState(false);
-  const [busy, setBusy] = useState<"copy" | "save" | null>(null);
+  const [busy, setBusy] = useState<"copy" | "save" | "pin" | null>(null);
   const [error, setError] = useState<string | null>(null);
   const [tool, setTool] = useState<Tool | null>(null);
-  const [color, setColor] = useState<string>(COLORS[0]);
-  const [size, setSize] = useState<Size>(1);
+  // 每个工具单独的颜色、粗细与线型，保存在本机
+  const [styles, setStyles] = useState<ToolStyles>(() => loadStyles());
   const [doc, setDoc] = useState<History>({ items: [], past: [], future: [] });
   const [draft, setDraft] = useState<Annotation | null>(null);
   const [selected, setSelected] = useState<number | null>(null);
@@ -114,7 +116,7 @@ export function CaptureOverlay() {
   }
 
   /** 复制或保存选区；成功后宿主结束会话并关闭覆盖窗，失败时保留选区并显示原因。 */
-  async function exportAs(action: "copy" | "save") {
+  async function exportAs(action: "copy" | "save" | "pin") {
     if (!selection || selection.width <= 0 || selection.height <= 0 || busy || drag.current || stroke.current) return;
     if (!context?.image) { setError("没有截图画面，无法导出"); return; }
     let items = annotations;
@@ -130,7 +132,10 @@ export function CaptureOverlay() {
     try {
       const image = snapshot ?? await loadImage(context.image);
       const png = await renderSelection(image, selection, window.innerWidth, items);
-      await invoke("capture_export", png, { headers: { "x-capture-session": String(context.session), "x-capture-action": action } });
+      const headers: Record<string, string> = { "x-capture-session": String(context.session), "x-capture-action": action };
+      // 贴图出现在原选区位置
+      if (action === "pin") headers["x-capture-rect"] = [selection.x, selection.y, selection.width, selection.height].join(",");
+      await invoke("capture_export", png, { headers });
     } catch (failure) {
       setError(failure instanceof Error ? failure.message : String(failure));
     } finally {
@@ -180,6 +185,7 @@ export function CaptureOverlay() {
     }
     setSelected(null);
     if (!tool) return;
+    const { color, size, wavy } = styles[tool];
     if (tool === "text") {
       setText({ id: null, x: point.x, y: point.y - FONT[size] * 0.15, value: "", color, size });
       return;
@@ -187,6 +193,7 @@ export function CaptureOverlay() {
     const id = nextId.current++;
     if (tool === "step") { commit([...annotations, { kind: "step", id, x: point.x, y: point.y, color, size }]); return; }
     const item: Annotation = tool === "arrow" ? { kind: "arrow", id, x1: point.x, y1: point.y, x2: point.x, y2: point.y, color, size }
+      : tool === "line" ? { kind: "line", id, x1: point.x, y1: point.y, x2: point.x, y2: point.y, color, size, wavy }
       : tool === "pen" ? { kind: "pen", id, points: [[point.x, point.y]], color, size }
       : { kind: tool, id, x: point.x, y: point.y, width: 0, height: 0, color, size };
     stroke.current = { kind: "draw", item, start: point, shift: event.shiftKey };
@@ -206,7 +213,7 @@ export function CaptureOverlay() {
       }
       const item = current.item;
       let next: Annotation;
-      if (item.kind === "arrow") {
+      if (item.kind === "arrow" || item.kind === "line") {
         const [x2, y2] = event.shiftKey ? snapAngle(item.x1, item.y1, point.x, point.y) : [point.x, point.y];
         next = { ...item, x2, y2 };
       } else if (item.kind === "pen") {
@@ -343,12 +350,27 @@ export function CaptureOverlay() {
 
   useEffect(() => { textRef.current?.focus(); }, [text?.id, text === null]);
 
-  /** 改颜色、粗细：同时作用于选中的标注。 */
-  function applyStyle(change: { color?: string; size?: Size }) {
-    if (change.color) setColor(change.color);
-    if (change.size !== undefined) setSize(change.size);
-    if (text) setText({ ...text, ...change });
-    if (selected !== null) commit(annotations.map((item) => item.id === selected ? { ...item, ...change } as Annotation : item));
+  const selectedItem = annotations.find((item) => item.id === selected);
+  // 样式面板对应的工具：当前工具，或选中标注的类型
+  const styleTool: Tool | null = tool ?? (selectedItem ? selectedItem.kind as Tool : null);
+  const currentStyle: ToolStyle | null = styleTool
+    ? (selectedItem && !tool ? { ...styles[styleTool], color: selectedItem.color, size: selectedItem.size, wavy: selectedItem.kind === "line" ? selectedItem.wavy : false } : styles[styleTool])
+    : null;
+
+  /** 改颜色、粗细、线型：记入该工具的样式并保存，同时作用于选中的标注与正在输入的文字。 */
+  function applyStyle(change: Partial<ToolStyle>) {
+    if (!styleTool) return;
+    setStyles((current) => {
+      const next = { ...current, [styleTool]: { ...current[styleTool], ...change } };
+      saveStyles(next);
+      return next;
+    });
+    if (text) setText({ ...text, ...(change.color ? { color: change.color } : {}), ...(change.size !== undefined ? { size: change.size } : {}) });
+    if (selected !== null) commit(annotations.map((item) => {
+      if (item.id !== selected) return item;
+      const { wavy, ...rest } = change;
+      return (item.kind === "line" && wavy !== undefined ? { ...item, ...rest, wavy } : { ...item, ...rest }) as Annotation;
+    }));
   }
 
   const visible = selection && selection.width > 0 && selection.height > 0;
@@ -407,21 +429,32 @@ export function CaptureOverlay() {
               <button type="button" aria-label="保存" title="保存到“图片/轻匣截图”（⌘S）" disabled={busy !== null} onClick={() => void exportAs("save")}>
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16h12" /></svg>
               </button>
-              <button type="button" className="capture-done" aria-label="完成" title="复制到剪贴板（回车）" disabled={busy !== null} onClick={() => void exportAs("copy")}>
-                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M4 10.5l4 4 8-9" /></svg>
-                <span>{busy === "copy" ? "复制中…" : busy === "save" ? "保存中…" : "完成"}</span>
+              <button type="button" aria-label="贴图" title="钉在屏幕上" disabled={busy !== null} onClick={() => void exportAs("pin")}>
+                <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 3.5h5l-.6 4.5 2.6 3H5.5l2.6-3zM10 11v5.5" /></svg>
               </button>
-              {(tool || selected !== null) && (
+              <button type="button" className="capture-done" aria-label="复制" title="复制到剪贴板（回车）" disabled={busy !== null} onClick={() => void exportAs("copy")}>
+                <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="7" y="7" width="9.5" height="10" rx="1.6" /><path d="M13 7V5.2A1.7 1.7 0 0011.3 3.5H5.2A1.7 1.7 0 003.5 5.2v7.1A1.7 1.7 0 005.2 14H7" /></svg>
+              </button>
+              {styleTool && currentStyle && (
                 <div className={`capture-style${panelAbove ? " above" : ""}`} role="group" aria-label="颜色与粗细" onMouseDown={(event) => event.preventDefault()}>
-                  {tool !== "mosaic" && COLORS.map((value) => (
-                    <button key={value} type="button" className="capture-color" aria-label={`颜色 ${value}`} aria-pressed={color === value} style={{ background: value }} onClick={() => applyStyle({ color: value })} />
+                  {styleTool !== "mosaic" && COLORS.map((value) => (
+                    <button key={value} type="button" className="capture-color" aria-label={`颜色 ${value}`} aria-pressed={currentStyle.color === value} style={{ background: value }} onClick={() => applyStyle({ color: value })} />
                   ))}
-                  {tool !== "mosaic" && <span className="capture-separator" />}
+                  {styleTool !== "mosaic" && <span className="capture-separator" />}
                   {SIZE_NAMES.map((name, index) => (
-                    <button key={name} type="button" className="capture-size-option" aria-label={`粗细：${name}`} aria-pressed={size === index} onClick={() => applyStyle({ size: index as Size })}>
-                      <span style={{ width: 4 + index * 4, height: 4 + index * 4 }} />
+                    <button key={name} type="button" className="capture-size-option" aria-label={`${styleTool === "text" ? "字号" : "粗细"}：${name}`} aria-pressed={currentStyle.size === index} onClick={() => applyStyle({ size: index as Size })}>
+                      {styleTool === "text" ? <b style={{ fontSize: 10 + index * 3 }}>A</b> : <span style={{ width: 4 + index * 4, height: 4 + index * 4 }} />}
                     </button>
                   ))}
+                  {styleTool === "line" && <>
+                    <span className="capture-separator" />
+                    <button type="button" className="capture-line-option" aria-label="线型：直线" title="直线" aria-pressed={!currentStyle.wavy} onClick={() => applyStyle({ wavy: false })}>
+                      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 10h14" /></svg>
+                    </button>
+                    <button type="button" className="capture-line-option" aria-label="线型：波浪线" title="波浪线" aria-pressed={currentStyle.wavy} onClick={() => applyStyle({ wavy: true })}>
+                      <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M2.5 10c1.5-3 3-3 4.5 0s3 3 4.5 0 3-3 4.5 0" /></svg>
+                    </button>
+                  </>}
                 </div>
               )}
               {error && <p className="capture-error" role="alert">{error}</p>}

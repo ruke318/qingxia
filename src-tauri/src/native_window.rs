@@ -402,14 +402,18 @@ fn hide_now(target: &Window, native: &NSPanel, main_thread: MainThreadMarker, re
     crate::shortcuts::stop_recording();
     crate::plugins::hide_active(target.app_handle());
     let _ = target.hide();
-    if visible {
+    // 有贴图时不隐藏应用，否则贴图会一起消失
+    if visible && crate::capture::pin::count() == 0 {
         hide_application(main_thread);
     }
 }
 
 /// 面板已由调用方收起，再隐藏应用以交还焦点。
 pub fn hide_app(window: &Window) -> Result<(), String> {
-    on_main_thread(window, |_, _, main_thread| hide_application(main_thread))
+    on_main_thread(window, |_, _, main_thread| {
+        // 有贴图时不隐藏应用，否则贴图会一起消失
+        if crate::capture::pin::count() == 0 { hide_application(main_thread) }
+    })
 }
 
 pub fn resize(window: &Window, height: f64) -> Result<(), String> {

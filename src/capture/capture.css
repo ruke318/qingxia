@@ -5,7 +5,7 @@ body { font-family: "SF Pro Text", "PingFang SC", -apple-system, sans-serif; -we
 .capture-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.28); cursor: crosshair; }
 .capture-overlay.has-selection { background: transparent; }
 .capture-hint { position: absolute; z-index: 2; top: 24px; left: 50%; margin: 0; padding: 8px 14px; border-radius: 8px; color: #fff; background: rgba(0, 0, 0, 0.55); font-size: 13px; transform: translateX(-50%); pointer-events: none; }
-.capture-selection { position: absolute; box-sizing: border-box; border: 1px solid #65c7ff; box-shadow: 0 0 0 10000px rgba(0, 0, 0, 0.28); cursor: move; }
+.capture-selection { position: absolute; box-sizing: border-box; border: 1px solid #65c7ff; border-radius: 6px; box-shadow: 0 0 0 10000px rgba(0, 0, 0, 0.28); cursor: move; }
 .capture-size { position: absolute; z-index: 2; padding: 4px 8px; border-radius: 4px; color: #fff; background: rgba(0, 0, 0, 0.7); font-size: 12px; white-space: nowrap; pointer-events: none; }
 .capture-handle { position: absolute; width: 10px; height: 10px; box-sizing: border-box; border: 1px solid #65c7ff; background: #fff; transform: translate(-50%, -50%); }
 .capture-handle-nw { left: 0; top: 0; cursor: nwse-resize; }
@@ -38,3 +38,8 @@ body { font-family: "SF Pro Text", "PingFang SC", -apple-system, sans-serif; -we
 .capture-toolbar .capture-color[aria-pressed="true"] { box-shadow: 0 0 0 2px #fff, 0 0 0 3.5px #3f7f63; }
 .capture-toolbar .capture-size-option { justify-content: center; width: 26px; min-width: 26px; padding: 0; }
 .capture-size-option span { display: block; border-radius: 50%; background: currentColor; }
+.capture-size-option b { color: currentColor; font-weight: 600; line-height: 1; }
+.capture-toolbar .capture-line-option { width: 28px; min-width: 28px; padding: 0; justify-content: center; }
+.capture-toolbar .capture-done { padding: 0 9px; }
+/* 贴图窗口：图片铺满窗口，圆角与细边框 */
+.pin-image { display: block; width: 100vw; height: 100vh; box-sizing: border-box; border-radius: 6px; outline: 1px solid rgba(0, 0, 0, 0.18); outline-offset: -1px; cursor: grab; object-fit: fill; }

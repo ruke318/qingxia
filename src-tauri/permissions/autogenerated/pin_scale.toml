@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pin-scale"
+description = "Enables the pin_scale command without any pre-configured scope."
+commands.allow = ["pin_scale"]
+
+[[permission]]
+identifier = "deny-pin-scale"
+description = "Denies the pin_scale command without any pre-configured scope."
+commands.deny = ["pin_scale"]

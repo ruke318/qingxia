@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-pin-close"
+description = "Enables the pin_close command without any pre-configured scope."
+commands.allow = ["pin_close"]
+
+[[permission]]
+identifier = "deny-pin-close"
+description = "Denies the pin_close command without any pre-configured scope."
+commands.deny = ["pin_close"]

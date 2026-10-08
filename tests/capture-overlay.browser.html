@@ -8,6 +8,7 @@
     const calls = [];
     let exportFailure = null;
     globalThis.isTauri = true;
+    localStorage.removeItem("qingbox.capture.styles");
     // 模拟 2 倍缩放屏幕的快照：像素尺寸为页面逻辑尺寸的两倍，左上 100×100 逻辑点为红色，其余为蓝色
     const snapshot = Object.assign(document.createElement("canvas"), { width: innerWidth * 2, height: innerHeight * 2 });
     const paint = snapshot.getContext("2d");
@@ -128,7 +129,7 @@
         assert(!toolbar(), "没有选区时不显示工具栏");
         await drag(overlay(), [100, 120], [300, 280]);
         assert(toolbar(), "选区完成后应显示工具栏");
-        assert(["取消", "保存", "完成"].every((name) => toolbar().querySelector(`[aria-label="${name}"]`)), "工具栏应有取消、保存、完成");
+        assert(["取消", "保存", "贴图", "复制"].every((name) => toolbar().querySelector(`[aria-label="${name}"]`)), "工具栏应有取消、保存、贴图、复制");
         selection().dispatchEvent(new MouseEvent("mousedown", { clientX: 150, clientY: 150, button: 0, buttons: 1, bubbles: true, cancelable: true }));
         await pause();
         assert(!toolbar(), "拖动选区时隐藏工具栏");
@@ -171,12 +172,12 @@
         exportFailure = "写入剪贴板失败";
         try {
           await drag(overlay(), [100, 120], [300, 280]);
-          document.querySelector('[aria-label="完成"]').click();
+          document.querySelector('[aria-label="复制"]').click();
           const deadline = Date.now() + 3000;
           while (!document.querySelector(".capture-error") && Date.now() < deadline) await pause();
           assert(document.querySelector(".capture-error")?.textContent === "写入剪贴板失败", "应显示失败原因");
           expectRect(100, 120, 200, 160);
-          assert(!document.querySelector('[aria-label="完成"]').disabled, "失败后可以重试");
+          assert(!document.querySelector('[aria-label="复制"]').disabled, "失败后可以重试");
         } finally { exportFailure = null; }
       }],
       ["工具栏贴底时移到选区上方", async () => {
@@ -245,6 +246,69 @@
         await pause();
         assert(!field() && !calls.some((call) => call.command === "capture_cancel"), "输入框里的 Esc 只退出输入");
         assert(!document.querySelector('[aria-label="撤销"]').disabled, "确认的文字可以撤销");
+      }],
+      ["每个工具单独记住样式，下次截图沿用", async () => {
+        await drag(overlay(), [50, 50], [450, 300]);
+        tool("矩形").click();
+        await pause();
+        document.querySelector('[aria-label="颜色 #3b82f6"]').click();
+        document.querySelector('[aria-label="粗细：粗"]').click();
+        await pause();
+        tool("箭头").click();
+        await pause();
+        assert(document.querySelector('[aria-label="颜色 #e5484d"]').getAttribute("aria-pressed") === "true", "箭头保持自己的颜色");
+        assert(document.querySelector('[aria-label="粗细：中"]').getAttribute("aria-pressed") === "true", "箭头保持自己的粗细");
+        await reset();
+        await drag(overlay(), [50, 50], [450, 300]);
+        tool("矩形").click();
+        await pause();
+        assert(document.querySelector('[aria-label="颜色 #3b82f6"]').getAttribute("aria-pressed") === "true", "重新截图后矩形沿用上次颜色");
+        assert(document.querySelector('[aria-label="粗细：粗"]').getAttribute("aria-pressed") === "true", "重新截图后矩形沿用上次粗细");
+        tool("文字").click();
+        await pause();
+        assert(document.querySelector('[aria-label="字号：中"]'), "文字工具显示字号");
+        localStorage.removeItem("qingbox.capture.styles");
+      }],
+      ["直线可切换波浪线，导出带起伏", async () => {
+        const reddish = (context) => {
+          for (let x = 130; x < 230; x++) for (let y = 155; y <= 157; y++) {
+            const [r, g, b] = context.getImageData((x - 50) * 2, (y - 50) * 2, 1, 1).data;
+            if (r > 180 && b < 120 && g < 120) return true;
+          }
+          return false;
+        };
+        await drag(overlay(), [50, 50], [300, 250]);
+        tool("直线").click();
+        await pause();
+        document.querySelector('[aria-label="线型：直线"]').click();
+        await pause();
+        await drag(selection(), [120, 150], [240, 150]);
+        assert(!reddish(await exported()), "直线不应偏离基线");
+        await reset();
+        await drag(overlay(), [50, 50], [300, 250]);
+        tool("直线").click();
+        await pause();
+        document.querySelector('[aria-label="线型：波浪线"]').click();
+        await pause();
+        await drag(selection(), [120, 150], [240, 150]);
+        assert(reddish(await exported()), "波浪线应在基线上下起伏");
+        localStorage.removeItem("qingbox.capture.styles");
+      }],
+      ["贴图把选区位置交给宿主", async () => {
+        await drag(overlay(), [100, 120], [300, 280]);
+        tool("贴图").click();
+        const deadline = Date.now() + 3000;
+        while (!calls.some((call) => call.command === "capture_export") && Date.now() < deadline) await pause();
+        const call = calls.find((call) => call.command === "capture_export");
+        assert(call?.options.headers["x-capture-action"] === "pin", "应以贴图方式导出");
+        assert(call.options.headers["x-capture-rect"] === "100,120,200,160", `选区位置不正确：${call.options.headers["x-capture-rect"]}`);
+      }],
+      ["样式数据损坏时使用默认值", async () => {
+        const { loadStyles } = await import("../src/capture/styles.ts");
+        const broken = loadStyles({ getItem: () => "{不是 JSON" });
+        assert(broken.rect.color === "#e5484d" && broken.rect.size === 1 && broken.cover.color === "#1f2328", "损坏时回到默认样式");
+        const partial = loadStyles({ getItem: () => JSON.stringify({ rect: { color: "#3b82f6", size: 9 }, line: { wavy: true } }) });
+        assert(partial.rect.color === "#3b82f6" && partial.rect.size === 1 && partial.line.wavy, "只采用有效的字段");
       }],
       ["箭头按住 ⇧ 吸附到 45°", async () => {
         const { snapAngle } = await import("../src/capture/annotations.ts");

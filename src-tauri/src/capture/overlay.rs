@@ -118,18 +118,26 @@ pub fn open(_app: &AppHandle, _session: u64) -> Result<usize, String> {
 /// 关闭全部覆盖窗（包括旧会话遗留的），并从面板注册表中移除。
 pub fn close_all(app: &AppHandle) {
     let labels: Vec<String> = app.webview_windows().into_keys().filter(|label| label.starts_with(LABEL_PREFIX)).collect();
-    for label in &labels {
-        #[cfg(target_os = "macos")]
-        if let Ok(panel) = tauri_nspanel::ManagerExt::get_webview_panel(app, label) {
-            panel.as_panel().orderOut(None);
-            // 恢复 Tauri 原来的窗口类型与所有权，再交给运行时销毁。
-            panel.to_window();
-        }
-        if let Some(window) = app.get_webview_window(label) {
-            if let Err(error) = window.destroy() { crate::diag!("关闭截图覆盖窗 {label} 失败：{error}"); }
-        }
-    }
+    for label in &labels { destroy_window(app, label); }
     if !labels.is_empty() { crate::diag!("截图：关闭 {} 个覆盖窗", labels.len()); }
+}
+
+/// 关闭由面板转换而来的窗口（覆盖窗、贴图）。直接销毁会导致进程崩溃，须先恢复窗口类型。
+pub fn destroy_window(app: &AppHandle, label: &str) {
+    #[cfg(target_os = "macos")]
+    if let Ok(panel) = tauri_nspanel::ManagerExt::get_webview_panel(app, label) {
+        panel.as_panel().orderOut(None);
+        // 恢复 Tauri 原来的窗口类型与所有权，再交给运行时销毁。
+        panel.to_window();
+    }
+    if let Some(window) = app.get_webview_window(label) {
+        if let Err(error) = window.destroy() { crate::diag!("关闭窗口 {label} 失败：{error}"); }
+    }
+}
+
+/// 从覆盖窗标签解析屏幕序号。
+pub fn screen_of(label: &str) -> Option<usize> {
+    label.strip_prefix(LABEL_PREFIX)?.split('-').nth(1)?.parse().ok()
 }
 
 #[cfg(test)]
@@ -142,5 +150,7 @@ mod tests {
         assert_eq!(session_of("capture-12-1"), Some(12));
         assert_eq!(session_of("main"), None);
         assert_eq!(session_of("capture-x-1"), None);
+        assert_eq!(screen_of("capture-12-1"), Some(1));
+        assert_eq!(screen_of("pin-3"), None);
     }
 }

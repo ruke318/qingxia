@@ -1,0 +1,14 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "pin-capability",
+  "description": "贴图窗口：只允许拖动窗口与操作自身贴图",
+  "webviews": [
+    "pin-*"
+  ],
+  "permissions": [
+    "core:window:allow-start-dragging",
+    "allow-pin-close",
+    "allow-pin-scale",
+    "allow-pin-copy"
+  ]
+}

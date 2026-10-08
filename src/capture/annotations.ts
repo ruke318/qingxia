@@ -1,12 +1,13 @@
 // 截图标注：数据结构、绘制与命中检测。坐标为覆盖窗的逻辑坐标（与选区相同）；
 // 屏幕预览与导出共用同一套绘制函数，导出结果与所见一致。
 
-export type Tool = "rect" | "arrow" | "pen" | "text" | "step" | "mosaic" | "cover";
+export type Tool = "rect" | "line" | "arrow" | "pen" | "text" | "step" | "mosaic" | "cover";
 export type Size = 0 | 1 | 2;
 type Base = { id: number; color: string; size: Size };
 export type Annotation =
   | (Base & { kind: "rect" | "mosaic" | "cover"; x: number; y: number; width: number; height: number })
   | (Base & { kind: "arrow"; x1: number; y1: number; x2: number; y2: number })
+  | (Base & { kind: "line"; x1: number; y1: number; x2: number; y2: number; wavy: boolean })
   | (Base & { kind: "pen"; points: [number, number][] })
   | (Base & { kind: "text"; x: number; y: number; text: string })
   | (Base & { kind: "step"; x: number; y: number });
@@ -53,6 +54,12 @@ export function bounds(item: Annotation): { x: number; y: number; width: number;
   switch (item.kind) {
     case "rect": case "mosaic": case "cover": return { x: item.x, y: item.y, width: item.width, height: item.height };
     case "arrow": return normalize(item.x1, item.y1, item.x2, item.y2);
+    case "line": {
+      // 波浪线有起伏，外接矩形向外留出振幅
+      const pad = item.wavy ? waveAmplitude(item.size) : 0;
+      const box = normalize(item.x1, item.y1, item.x2, item.y2);
+      return { x: box.x - pad, y: box.y - pad, width: box.width + pad * 2, height: box.height + pad * 2 };
+    }
     case "pen": {
       const xs = item.points.map(([x]) => x), ys = item.points.map(([, y]) => y);
       return normalize(Math.min(...xs), Math.min(...ys), Math.max(...xs), Math.max(...ys));
@@ -67,8 +74,9 @@ export function hitTest(annotations: Annotation[], x: number, y: number): number
   for (let index = annotations.length - 1; index >= 0; index--) {
     const item = annotations[index];
     const tolerance = STROKE[item.size] + 4;
-    if (item.kind === "arrow") {
-      if (distanceToSegment(x, y, item.x1, item.y1, item.x2, item.y2) <= tolerance) return item.id;
+    if (item.kind === "arrow" || item.kind === "line") {
+      const reach = tolerance + (item.kind === "line" && item.wavy ? waveAmplitude(item.size) : 0);
+      if (distanceToSegment(x, y, item.x1, item.y1, item.x2, item.y2) <= reach) return item.id;
       continue;
     }
     if (item.kind === "pen") {
@@ -99,7 +107,7 @@ function distanceToSegment(x: number, y: number, x1: number, y1: number, x2: num
 /** 平移标注。 */
 export function translate(item: Annotation, dx: number, dy: number): Annotation {
   switch (item.kind) {
-    case "arrow": return { ...item, x1: item.x1 + dx, y1: item.y1 + dy, x2: item.x2 + dx, y2: item.y2 + dy };
+    case "arrow": case "line": return { ...item, x1: item.x1 + dx, y1: item.y1 + dy, x2: item.x2 + dx, y2: item.y2 + dy };
     case "pen": return { ...item, points: item.points.map(([x, y]) => [x + dx, y + dy] as [number, number]) };
     default: return { ...item, x: item.x + dx, y: item.y + dy };
   }
@@ -130,6 +138,10 @@ export function drawAnnotations(context: CanvasRenderingContext2D, annotations: 
       case "arrow":
         drawArrow(context, item.x1, item.y1, item.x2, item.y2, STROKE[item.size]);
         break;
+      case "line":
+        if (item.wavy) drawWave(context, item.x1, item.y1, item.x2, item.y2, item.size);
+        else { context.beginPath(); context.moveTo(item.x1, item.y1); context.lineTo(item.x2, item.y2); context.stroke(); }
+        break;
       case "pen":
         context.beginPath();
         item.points.forEach(([x, y], index) => index ? context.lineTo(x, y) : context.moveTo(x, y));
@@ -157,6 +169,23 @@ export function drawAnnotations(context: CanvasRenderingContext2D, annotations: 
     }
     context.restore();
   }
+}
+
+/** 波浪线的振幅与波长随粗细增大。 */
+function waveAmplitude(size: Size) { return STROKE[size] * 1.2 + 2; }
+
+function drawWave(context: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, size: Size) {
+  const length = Math.hypot(x2 - x1, y2 - y1);
+  const amplitude = waveAmplitude(size);
+  const wavelength = STROKE[size] * 3 + 10;
+  context.save();
+  context.translate(x1, y1);
+  context.rotate(Math.atan2(y2 - y1, x2 - x1));
+  context.beginPath();
+  context.moveTo(0, 0);
+  for (let step = 1; step <= length; step++) context.lineTo(step, Math.sin((step / wavelength) * Math.PI * 2) * amplitude);
+  context.stroke();
+  context.restore();
 }
 
 function drawArrow(context: CanvasRenderingContext2D, x1: number, y1: number, x2: number, y2: number, width: number) {

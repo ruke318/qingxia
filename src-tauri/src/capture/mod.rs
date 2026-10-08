@@ -5,6 +5,7 @@
 pub mod export;
 pub mod overlay;
 pub mod permission;
+pub mod pin;
 pub mod screenshot;
 
 use std::sync::Mutex;
