@@ -2,6 +2,13 @@
   "$schema": "../gen/schemas/desktop-schema.json",
   "identifier": "capture-capability",
   "description": "截图覆盖窗：只允许监听事件与本会话的截图命令",
-  "webviews": ["capture-*"],
-  "permissions": ["core:event:allow-listen", "core:event:allow-unlisten", "allow-capture-cancel"]
+  "webviews": [
+    "capture-*"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-capture-cancel",
+    "allow-capture-export"
+  ]
 }

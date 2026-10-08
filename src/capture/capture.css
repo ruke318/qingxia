@@ -16,3 +16,11 @@ body { font-family: "SF Pro Text", "PingFang SC", -apple-system, sans-serif; -we
 .capture-handle-s { left: 50%; top: 100%; cursor: ns-resize; }
 .capture-handle-sw { left: 0; top: 100%; cursor: nesw-resize; }
 .capture-handle-w { left: 0; top: 50%; cursor: ew-resize; }
+.capture-toolbar { position: absolute; z-index: 2; display: flex; align-items: center; gap: 2px; height: 38px; padding: 0 4px; box-sizing: border-box; border-radius: 9px; background: rgba(250, 251, 250, 0.96); box-shadow: 0 6px 24px rgba(0, 0, 0, 0.28), 0 0 0 0.5px rgba(0, 0, 0, 0.12); cursor: default; }
+.capture-toolbar button { display: flex; align-items: center; gap: 4px; height: 30px; min-width: 30px; padding: 0 7px; border: 0; border-radius: 6px; color: #262b31; background: transparent; font: inherit; font-size: 13px; cursor: pointer; }
+.capture-toolbar button:hover:not(:disabled) { background: rgba(42, 49, 59, 0.08); }
+.capture-toolbar button:disabled { cursor: default; opacity: 0.5; }
+.capture-toolbar svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
+.capture-toolbar .capture-done { color: #fff; background: #3f7f63; padding: 0 10px; }
+.capture-toolbar .capture-done:hover:not(:disabled) { background: #356c54; }
+.capture-error { position: absolute; top: 100%; right: 0; margin: 6px 0 0; padding: 6px 10px; border-radius: 6px; color: #fff; background: rgba(184, 58, 58, 0.95); font-size: 12px; white-space: nowrap; }

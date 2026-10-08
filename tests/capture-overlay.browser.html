@@ -4,12 +4,22 @@
 <body>
   <div id="root"></div>
   <script type="module">
-    // 只模拟取消命令，选区交互使用实际覆盖窗组件与样式。
+    // 模拟取消与导出命令，选区交互使用实际覆盖窗组件与样式。
     const calls = [];
+    let exportFailure = null;
     globalThis.isTauri = true;
-    window.__QINGBOX_CAPTURE__ = { session: 12, screen: 1 };
+    // 模拟 2 倍缩放屏幕的快照：像素尺寸为页面逻辑尺寸的两倍，左上 100×100 逻辑点为红色，其余为蓝色
+    const snapshot = Object.assign(document.createElement("canvas"), { width: innerWidth * 2, height: innerHeight * 2 });
+    const paint = snapshot.getContext("2d");
+    paint.fillStyle = "#0000ff"; paint.fillRect(0, 0, snapshot.width, snapshot.height);
+    paint.fillStyle = "#ff0000"; paint.fillRect(0, 0, 200, 200);
+    window.__QINGBOX_CAPTURE__ = { session: 12, screen: 1, scale: 2, image: snapshot.toDataURL("image/png") };
     window.__TAURI_INTERNALS__ = {
-      invoke(command, args) { calls.push({ command, args }); return Promise.resolve(); },
+      invoke(command, args, options) {
+        calls.push({ command, args, options });
+        if (command === "capture_export" && exportFailure) return Promise.reject(exportFailure);
+        return Promise.resolve(null);
+      },
     };
     const React = await import("react");
     const { createRoot } = await import("react-dom/client");
@@ -42,7 +52,7 @@
       ["反向拖拽建立选区并显示尺寸", async () => {
         await drag(overlay(), [300, 280], [100, 120]);
         expectRect(100, 120, 200, 160);
-        assert(document.querySelector('[aria-label="选区尺寸"]').textContent === "200 × 160", "尺寸提示不正确");
+        assert(document.querySelector('[aria-label="选区尺寸"]').textContent === "400 × 320", "尺寸提示应为物理像素（2 倍）");
       }],
       ["松开时使用最终位置，单击不留下零尺寸选区", async () => {
         overlay().dispatchEvent(new MouseEvent("mousedown", { clientX: 100, clientY: 120, buttons: 1, bubbles: true }));
@@ -98,6 +108,69 @@
         window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
         await pause();
         assert(calls.length === 1 && calls[0].command === "capture_cancel" && calls[0].args.session === 12, "应只取消本会话一次");
+      }],
+      ["选区完成后显示工具栏，拖动期间隐藏", async () => {
+        const toolbar = () => document.querySelector('[aria-label="截图操作"]');
+        assert(!toolbar(), "没有选区时不显示工具栏");
+        await drag(overlay(), [100, 120], [300, 280]);
+        assert(toolbar(), "选区完成后应显示工具栏");
+        assert(["取消", "保存", "完成"].every((name) => toolbar().querySelector(`[aria-label="${name}"]`)), "工具栏应有取消、保存、完成");
+        selection().dispatchEvent(new MouseEvent("mousedown", { clientX: 150, clientY: 150, button: 0, buttons: 1, bubbles: true, cancelable: true }));
+        await pause();
+        assert(!toolbar(), "拖动选区时隐藏工具栏");
+        window.dispatchEvent(new MouseEvent("mouseup", { clientX: 150, clientY: 150, button: 0, bubbles: true }));
+        await pause();
+        assert(toolbar(), "松开后恢复工具栏");
+      }],
+      ["回车按物理像素导出 PNG 并复制", async () => {
+        await drag(overlay(), [50, 50], [150, 130]);
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Enter", bubbles: true, cancelable: true }));
+        const deadline = Date.now() + 3000;
+        while (!calls.some((call) => call.command === "capture_export") && Date.now() < deadline) await pause();
+        const call = calls.find((call) => call.command === "capture_export");
+        assert(call, "回车应导出");
+        assert(call.options.headers["x-capture-session"] === "12" && call.options.headers["x-capture-action"] === "copy", "请求头应带会话编号与复制动作");
+        const bytes = call.args;
+        assert(bytes instanceof Uint8Array && bytes[0] === 0x89 && bytes[1] === 0x50, "请求体应为 PNG 字节");
+        const image = await createImageBitmap(new Blob([bytes], { type: "image/png" }));
+        assert(image.width === 200 && image.height === 160, `导出尺寸应为物理像素 200×160，实际 ${image.width}×${image.height}`);
+        const probe = Object.assign(document.createElement("canvas"), { width: image.width, height: image.height }).getContext("2d");
+        probe.drawImage(image, 0, 0);
+        const [red] = probe.getImageData(10, 10, 1, 1).data;
+        const [, , blue] = probe.getImageData(190, 150, 1, 1).data;
+        assert(red > 200 && blue > 200, "导出内容应与选区对应的快照像素一致");
+      }],
+      ["⌘S 保存，双击选区复制", async () => {
+        await drag(overlay(), [100, 120], [300, 280]);
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "s", metaKey: true, bubbles: true, cancelable: true }));
+        let deadline = Date.now() + 3000;
+        while (!calls.some((call) => call.command === "capture_export") && Date.now() < deadline) await pause();
+        assert(calls.find((call) => call.command === "capture_export")?.options.headers["x-capture-action"] === "save", "⌘S 应保存");
+        calls.length = 0;
+        await pause();
+        selection().dispatchEvent(new MouseEvent("dblclick", { clientX: 150, clientY: 150, bubbles: true }));
+        deadline = Date.now() + 3000;
+        while (!calls.some((call) => call.command === "capture_export") && Date.now() < deadline) await pause();
+        assert(calls.find((call) => call.command === "capture_export")?.options.headers["x-capture-action"] === "copy", "双击选区应复制");
+      }],
+      ["导出失败显示原因并保留选区", async () => {
+        exportFailure = "写入剪贴板失败";
+        try {
+          await drag(overlay(), [100, 120], [300, 280]);
+          document.querySelector('[aria-label="完成"]').click();
+          const deadline = Date.now() + 3000;
+          while (!document.querySelector(".capture-error") && Date.now() < deadline) await pause();
+          assert(document.querySelector(".capture-error")?.textContent === "写入剪贴板失败", "应显示失败原因");
+          expectRect(100, 120, 200, 160);
+          assert(!document.querySelector('[aria-label="完成"]').disabled, "失败后可以重试");
+        } finally { exportFailure = null; }
+      }],
+      ["工具栏贴底时移到选区上方", async () => {
+        const { toolbarPosition } = await import("../src/capture/CaptureOverlay.tsx");
+        const viewport = { width: 1000, height: 800 };
+        assert(toolbarPosition({ x: 100, y: 100, width: 200, height: 100 }, viewport).top === 208, "默认放在选区下方");
+        assert(toolbarPosition({ x: 100, y: 300, width: 200, height: 480 }, viewport).top === 254, "下方放不下时放上方");
+        assert(toolbarPosition({ x: 0, y: 10, width: 1000, height: 780 }, viewport).top === 744, "上下都放不下时放在选区内底部");
       }],
     ];
     const result = { passed: 0, total: scenarios.length, failures: [] };

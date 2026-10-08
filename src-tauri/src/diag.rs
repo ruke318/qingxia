@@ -18,7 +18,7 @@ fn directory() -> Option<PathBuf> {
 }
 
 /// 本地时间，精确到毫秒，如 `2026-10-08 21:03:15.123`。
-fn timestamp() -> String {
+pub(crate) fn timestamp() -> String {
     let now = SystemTime::now().duration_since(UNIX_EPOCH).unwrap_or_default();
     #[cfg(unix)]
     {

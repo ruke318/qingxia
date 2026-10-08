@@ -82,6 +82,8 @@ pub fn serve(webview_label: &str, path: &str) -> tauri::http::Response<Vec<u8>> 
             .status(status)
             .header("Content-Type", mime)
             .header("Cache-Control", "no-store")
+            // 覆盖窗导出时把快照画到 canvas 上，需要跨源读取像素；读取权限仍由下方的会话校验控制。
+            .header("Access-Control-Allow-Origin", "*")
             .body(body)
             .expect("构造截图资源响应失败")
     };

@@ -2,6 +2,7 @@
 //!
 //! 同一时刻只有一个会话，按下快捷键或在搜索框选“截图”都调用 [`start_screenshot`]。
 //! 每个会话有递增编号，异步回调携带编号推进状态，会话已取消或被新会话取代时，迟到的回调直接丢弃。
+pub mod export;
 pub mod overlay;
 pub mod permission;
 pub mod screenshot;
@@ -29,8 +30,6 @@ pub enum Phase {
 }
 
 /// 推动会话前进的事件。
-// Selected、Export、Done 由 SC15～SC17 的选区、导出接入，届时去掉 allow。
-#[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
     /// 用户触发截图。
