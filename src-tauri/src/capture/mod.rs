@@ -2,6 +2,7 @@
 //!
 //! 同一时刻只有一个会话，按下快捷键或在搜索框选“截图”都调用 [`start_screenshot`]。
 //! 每个会话有递增编号，异步回调携带编号推进状态，会话已取消或被新会话取代时，迟到的回调直接丢弃。
+pub mod overlay;
 pub mod permission;
 
 use std::sync::Mutex;
@@ -27,7 +28,7 @@ pub enum Phase {
 }
 
 /// 推动会话前进的事件。
-// Ready 至 Fail 由 SC14～SC17 的快照、选区、导出接入，届时去掉 allow。
+// Selected、Export、Done 由 SC15～SC17 的选区、导出接入，届时去掉 allow。
 #[allow(dead_code)]
 #[derive(Clone, Copy, Debug, PartialEq, Eq)]
 pub enum Event {
@@ -100,8 +101,7 @@ impl CaptureState {
         Ok(true)
     }
 
-    /// 当前会话是否进行中；主面板的失焦收起、抢回焦点等逻辑据此避让（SC13 接入，届时去掉 allow）。
-    #[allow(dead_code)]
+    /// 当前会话是否进行中；主面板的失焦收起、抢回焦点等逻辑据此避让。
     pub fn active(&self) -> bool {
         self.session.lock().is_ok_and(|session| session.phase != Phase::Idle)
     }
@@ -147,10 +147,38 @@ pub fn start_screenshot(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_window("main") {
         if window.is_visible().unwrap_or(false) { crate::hide_panel(&window, "开始截图")?; }
     }
-    // 权限检查（SC12）、覆盖窗（SC13）、快照（SC14）接入前，准备阶段无法继续，直接结束会话。
-    state.advance(id, Event::Cancel)?;
-    crate::diag!("截图：会话 {id} 结束（选区与标注尚未实现）");
+    // 快照（SC14）接入前，覆盖窗显示的是实时画面。
+    if let Err(error) = overlay::open(app, id) {
+        overlay::close_all(app);
+        state.advance(id, Event::Fail)?;
+        return Err(error);
+    }
+    state.advance(id, Event::Ready)?;
     Ok(())
+}
+
+/// 结束指定会话并关闭覆盖窗；会话已结束或已被新会话取代时什么也不做。
+fn finish(app: &AppHandle, id: u64, event: Event, reason: &str) -> Result<(), String> {
+    if !app.state::<CaptureState>().advance(id, event)? { return Ok(()) }
+    overlay::close_all(app);
+    crate::diag!("截图：会话 {id} 结束（{reason}）");
+    Ok(())
+}
+
+/// 取消进行中的截图，例如截图时按下唤起快捷键。
+pub fn cancel_active(app: &AppHandle) {
+    let state = app.state::<CaptureState>();
+    let Ok(id) = state.session.lock().map(|session| (session.phase != Phase::Idle).then_some(session.id)) else { return };
+    if let Some(id) = id {
+        if let Err(error) = finish(app, id, Event::Cancel, "唤起主面板") { crate::diag!("取消截图失败：{error}"); }
+    }
+}
+
+/// 覆盖窗请求取消（Esc）。只接受本会话覆盖窗的调用。
+#[tauri::command]
+pub fn capture_cancel(app: AppHandle, webview: Webview, session: u64) -> Result<(), String> {
+    if overlay::session_of(webview.label()) != Some(session) { return Err("截图会话已失效".into()) }
+    finish(&app, session, Event::Cancel, "用户取消")
 }
 
 /// 搜索框选中“截图”。

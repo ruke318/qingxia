@@ -61,6 +61,8 @@ fn show_launcher(app: &AppHandle) {
 /// 唤起主入口并在结果区显示一条提示（如截图缺少权限）；提示随唤起事件一起送达，不会被查询刷新清掉。
 fn show_launcher_with(app: &AppHandle, notice: Option<&str>) {
     shortcuts::stop_recording();
+    // 截图中唤起主面板：先结束截图，覆盖窗不与主面板叠在一起。
+    if app.state::<capture::CaptureState>().active() { capture::cancel_active(app); }
     plugins::hide_active(app);
     if let Some(view) = app.get_webview("main") { let _ = view.set_focus(); }
     if let Some(window) = app.get_window("main") {
@@ -544,8 +546,10 @@ pub fn run() {
             show_launcher(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, capture::start_screenshot_command, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
+        .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, capture::start_screenshot_command, capture::capture_cancel, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
         .on_window_event(|window, event| {
+            // 失焦收起只作用于主面板；截图覆盖窗自行管理焦点与关闭。
+            if window.label() != "main" { return }
             if let WindowEvent::Focused(false) = event {
                 diag!("窗口失焦事件：{}", window.label());
                 shortcuts::stop_recording();

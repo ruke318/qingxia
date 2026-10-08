@@ -108,7 +108,7 @@ pub fn prepare(window: &WebviewWindow) -> Result<(), String> {
     Ok(())
 }
 
-fn contains(frame: NSRect, point: NSPoint) -> bool {
+pub(crate) fn contains(frame: NSRect, point: NSPoint) -> bool {
     point.x >= frame.origin.x
         && point.x < frame.origin.x + frame.size.width
         && point.y >= frame.origin.y
