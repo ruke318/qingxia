@@ -135,7 +135,8 @@ pub fn serve(webview_label: &str, path: &str) -> tauri::http::Response<Vec<u8>> 
 /// 矩形：x、y、宽、高。
 pub type Frame = (f64, f64, f64, f64);
 
-/// 屏幕上的普通窗口（层级 0），按从前到后排列，坐标为全局逻辑点（主屏左上角为原点）。排除轻匣自身与过小的窗口。
+/// 可吸附的窗口，按从前到后排列，坐标为全局逻辑点（主屏左上角为原点）。
+/// 取其他应用的普通窗口（层级 0）与轻匣自身可见的窗口（主面板、贴图，层级较高），排除过小的窗口。
 #[cfg(target_os = "macos")]
 pub fn window_list() -> Vec<Frame> {
     use objc2::runtime::AnyObject;
@@ -151,7 +152,8 @@ pub fn window_list() -> Vec<Frame> {
     let own = f64::from(std::process::id());
     let mut windows = Vec::new();
     for info in array.iter() {
-        if number(&info, "kCGWindowLayer") != Some(0.0) || number(&info, "kCGWindowOwnerPID") == Some(own) { continue }
+        let own_window = number(&info, "kCGWindowOwnerPID") == Some(own);
+        if !own_window && number(&info, "kCGWindowLayer") != Some(0.0) { continue }
         if number(&info, "kCGWindowAlpha").is_some_and(|alpha| alpha <= 0.0) { continue }
         let Some(bounds) = info.objectForKey(&NSString::from_str("kCGWindowBounds")).and_then(|value| value.downcast::<NSDictionary>().ok()) else { continue };
         let bounds: &NSDictionary<NSString, AnyObject> = unsafe { &*(objc2::rc::Retained::as_ptr(&bounds) as *const _) };
@@ -232,18 +234,13 @@ pub fn capture(done: impl FnOnce(Result<Vec<Snapshot>, String>) + Send + 'static
         };
         let displays = unsafe { content.displays() };
         if displays.is_empty() { fail("没有可截取的显示器".into()); return }
-        // 排除轻匣自身：主面板此时已收起，这里防止残留窗口出现在快照中。
-        let pid = std::process::id() as libc::pid_t;
-        let own: Vec<_> = unsafe { content.applications() }.iter().filter(|application| unsafe { application.processID() } == pid).collect();
-        let excluded = NSArray::from_retained_slice(&own);
+        // 不排除任何窗口：主面板、插件界面与贴图都可以截取；此时覆盖窗尚未出现，不会进入快照。
         let Some(done) = done.lock().ok().and_then(|mut done| done.take()) else { return };
         let collector = Arc::new(Mutex::new(Collector { remaining: displays.len(), snapshots: Vec::new(), error: None, done: Some(done) }));
         for display in displays.iter() {
             let display_id = unsafe { display.displayID() };
             let filter = unsafe {
-                SCContentFilter::initWithDisplay_excludingApplications_exceptingWindows(
-                    SCContentFilter::alloc(), &display, &excluded, &NSArray::<SCWindow>::new(),
-                )
+                SCContentFilter::initWithDisplay_excludingWindows(SCContentFilter::alloc(), &display, &NSArray::<SCWindow>::new())
             };
             let info = unsafe { SCShareableContent::infoForFilter(&filter) };
             let scale = f64::from(unsafe { info.pointPixelScale() });

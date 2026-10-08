@@ -204,6 +204,8 @@ fn settle_later(window: &Window) {
         std::thread::sleep(SETTLE);
         let _ = on_main_thread(&target, |target, native, main_thread| {
             if !native.isVisible() || native.isKeyWindow() || settling() { return }
+            // 截图覆盖窗持有焦点时不抢回
+            if target.app_handle().state::<crate::capture::CaptureState>().active() { return }
             native.makeKeyAndOrderFront(None);
             let key = native.isKeyWindow();
             let active = NSApplication::sharedApplication(main_thread).isActive();
@@ -375,6 +377,8 @@ pub fn present(window: &Window, height: f64, event: &'static str, notice: Option
 }
 
 pub fn hide_if_unfocused(window: &Window) -> Result<(), String> {
+    // 截图期间覆盖窗取得焦点，主面板保持原样，截图结束后用户可以继续使用
+    if window.app_handle().state::<crate::capture::CaptureState>().active() { return Ok(()) }
     on_main_thread(window, |target, native, main_thread| {
         // 过渡期内的失焦多为系统在应用间来回切换激活，不收起，重新取得键盘焦点。
         if settling() && native.isVisible() {
@@ -409,7 +413,15 @@ fn hide_now(target: &Window, native: &NSPanel, main_thread: MainThreadMarker, re
 }
 
 /// 截图结束后交还焦点：应用处于激活状态且没有贴图时隐藏应用。须在主线程调用。
-pub fn release_focus() {
+/// 主面板仍显示时（快捷键截取轻匣自身）保留应用，用户继续使用面板。
+pub fn release_focus(app: &tauri::AppHandle) {
+    let main = app.get_window("main");
+    let panel_visible = main.as_ref().and_then(|window| window.is_visible().ok()).unwrap_or(false);
+    if panel_visible {
+        // 面板仍在：把键盘焦点还给面板，可以直接继续输入
+        if let Some(window) = main { let _ = on_main_thread(&window, |_, native, _| native.makeKeyAndOrderFront(None)); }
+        return;
+    }
     if let Some(main_thread) = MainThreadMarker::new() {
         if crate::capture::pin::count() == 0 { hide_application(main_thread) }
     }

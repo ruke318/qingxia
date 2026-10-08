@@ -130,7 +130,8 @@ pub fn supported() -> bool {
 }
 
 /// 截图入口：快捷键与搜索框共用。会话进行中再次触发会被忽略。
-pub fn start_screenshot(app: &AppHandle) -> Result<(), String> {
+/// `hide_panel` 为真时先收起主面板（从搜索框启动，面板只是入口）；快捷键启动时保留主面板与插件界面，可以截取轻匣自身。
+pub fn start_screenshot(app: &AppHandle, hide_panel: bool) -> Result<(), String> {
     if !supported() {
         crate::diag!("截图：系统版本低于 macOS {MINIMUM_MACOS}，不可用");
         return Err(format!("截图需要 macOS {MINIMUM_MACOS} 或更高版本"));
@@ -152,9 +153,10 @@ pub fn start_screenshot(app: &AppHandle) -> Result<(), String> {
         crate::show_launcher_with(app, Some(notice));
         return Ok(());
     }
-    // 先收起主面板，快照中不能出现轻匣自身。
-    if let Some(window) = app.get_window("main") {
-        if window.is_visible().unwrap_or(false) { crate::hide_panel(&window, "开始截图")?; }
+    if hide_panel {
+        if let Some(window) = app.get_window("main") {
+            if window.is_visible().unwrap_or(false) { crate::hide_panel(&window, "从搜索框开始截图")?; }
+        }
     }
     // 冻结画面：全部屏幕截完后再打开覆盖窗，覆盖窗不会出现在快照中。
     let handle = app.clone();
@@ -196,7 +198,7 @@ fn finish(app: &AppHandle, id: u64, event: Event, reason: &str) -> Result<(), St
     screenshot::clear();
     // 保存对话框会激活应用；结束后把焦点交还给原来的应用（有贴图时保留应用，避免贴图一起隐藏）
     #[cfg(target_os = "macos")]
-    crate::native_window::release_focus();
+    crate::native_window::release_focus(app);
     crate::diag!("截图：会话 {id} 结束（{reason}）");
     Ok(())
 }
@@ -232,7 +234,7 @@ pub fn capture_cancel(app: AppHandle, webview: Webview, session: u64) -> Result<
 #[tauri::command]
 pub fn start_screenshot_command(app: AppHandle, webview: Webview) -> Result<(), String> {
     if webview.label() != "main" { return Err("只有主入口可以开始截图".into()) }
-    start_screenshot(&app)
+    start_screenshot(&app, true)
 }
 
 #[cfg(test)]

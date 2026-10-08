@@ -215,7 +215,7 @@ fn register_global(app: &AppHandle, id: &str, shortcut: Shortcut) -> Result<(), 
             if owner == LAUNCHER {
                 crate::show_launcher(app);
             } else if owner == SCREENSHOT {
-                if let Err(error) = crate::capture::start_screenshot(app) { crate::diag!("截图未开始：{error}"); }
+                if let Err(error) = crate::capture::start_screenshot(app, false) { crate::diag!("截图未开始：{error}"); }
             } else {
                 let _ = crate::plugins::open_plugin(app.clone(), owner.clone());
             }

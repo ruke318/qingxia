@@ -37,7 +37,7 @@ objc2-app-kit = { version = "0.3.2", features = ["NSScreen", "NSEvent", "NSWindo
 objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSProcessInfo", "NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSValue"] }
 objc2-core-foundation = "0.3.2"
 objc2-core-graphics = { version = "0.3.2", features = ["CGWindow"] }
-objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = ["std", "SCScreenshotManager", "SCShareableContent", "SCStream", "objc2-core-graphics", "objc2-core-foundation", "block2", "libc"] }
+objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = ["std", "SCScreenshotManager", "SCShareableContent", "SCStream", "objc2-core-graphics", "objc2-core-foundation", "block2"] }
 
 # 插件 iframe 的 IPC 加固：只接受主 frame 的脚本消息，说明见 patches/wry/轻匣补丁说明.md。
 [patch.crates-io]
