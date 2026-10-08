@@ -1,0 +1,114 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>截图选区回归检查</title></head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    // 只模拟取消命令，选区交互使用实际覆盖窗组件与样式。
+    const calls = [];
+    globalThis.isTauri = true;
+    window.__QINGBOX_CAPTURE__ = { session: 12, screen: 1 };
+    window.__TAURI_INTERNALS__ = {
+      invoke(command, args) { calls.push({ command, args }); return Promise.resolve(); },
+    };
+    const React = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    const { CaptureOverlay } = await import("../src/capture/CaptureOverlay.tsx");
+    await import("../src/capture/capture.css");
+    let root;
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 10));
+    function assert(value, message) { if (!value) throw new Error(message); }
+    const overlay = () => document.querySelector(".capture-overlay");
+    const selection = () => document.querySelector('[aria-label="截图选区"]');
+    async function reset() {
+      root?.unmount();
+      root = createRoot(document.getElementById("root"));
+      root.render(React.createElement(React.StrictMode, null, React.createElement(CaptureOverlay)));
+      calls.length = 0;
+      await pause();
+    }
+    async function drag(target, from, to) {
+      target.dispatchEvent(new MouseEvent("mousedown", { clientX: from[0], clientY: from[1], button: 0, buttons: 1, bubbles: true, cancelable: true }));
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: to[0], clientY: to[1], buttons: 1, bubbles: true }));
+      window.dispatchEvent(new MouseEvent("mouseup", { clientX: to[0], clientY: to[1], button: 0, bubbles: true }));
+      await pause();
+    }
+    function expectRect(x, y, width, height) {
+      assert(selection(), "拖拽后没有出现选区");
+      const rect = selection().getBoundingClientRect();
+      assert([rect.x, rect.y, rect.width, rect.height].every((value, index) => Math.abs(value - [x, y, width, height][index]) < 1), `选区位置或尺寸错误：${rect.x},${rect.y},${rect.width},${rect.height}`);
+    }
+    const scenarios = [
+      ["反向拖拽建立选区并显示尺寸", async () => {
+        await drag(overlay(), [300, 280], [100, 120]);
+        expectRect(100, 120, 200, 160);
+        assert(document.querySelector('[aria-label="选区尺寸"]').textContent === "200 × 160", "尺寸提示不正确");
+      }],
+      ["松开时使用最终位置，单击不留下零尺寸选区", async () => {
+        overlay().dispatchEvent(new MouseEvent("mousedown", { clientX: 100, clientY: 120, buttons: 1, bubbles: true }));
+        window.dispatchEvent(new MouseEvent("mouseup", { clientX: 300, clientY: 280, bubbles: true }));
+        await pause();
+        expectRect(100, 120, 200, 160);
+        await reset();
+        await drag(overlay(), [100, 100], [100, 100]);
+        assert(!selection(), "单击不应留下零尺寸选区");
+      }],
+      ["拖动选区移动并限制在本屏范围内", async () => {
+        await drag(overlay(), [100, 120], [300, 280]);
+        await drag(selection(), [150, 150], [450, 350]);
+        expectRect(400, 320, 200, 160);
+        await drag(selection(), [450, 350], [-1000, -1000]);
+        expectRect(0, 0, 200, 160);
+        await drag(selection(), [50, 50], [innerWidth + 500, innerHeight + 500]);
+        expectRect(innerWidth - 200, innerHeight - 160, 200, 160);
+      }],
+      ["拖动右下角缩放，可越过原来的左上角", async () => {
+        await drag(overlay(), [100, 120], [300, 280]);
+        await drag(document.querySelector('[aria-label="调整选区：右下角"]'), [300, 280], [400, 360]);
+        expectRect(100, 120, 300, 240);
+        await drag(document.querySelector('[aria-label="调整选区：右下角"]'), [400, 360], [50, 60]);
+        expectRect(50, 60, 50, 60);
+      }],
+      ["拖动左边调整宽度，边界不能越屏", async () => {
+        await drag(overlay(), [100, 120], [300, 280]);
+        await drag(document.querySelector('[aria-label="调整选区：左边"]'), [100, 200], [-50, 200]);
+        expectRect(0, 120, 300, 160);
+        assert(document.querySelectorAll('[aria-label^="调整选区："]').length === 8, "应提供四边和四角的调整手柄");
+      }],
+      ["在选区外重新拖拽，右键不改变选区", async () => {
+        await drag(overlay(), [100, 120], [300, 280]);
+        overlay().dispatchEvent(new MouseEvent("mousedown", { clientX: 400, clientY: 400, button: 2, buttons: 2, bubbles: true }));
+        window.dispatchEvent(new MouseEvent("mousemove", { clientX: 500, clientY: 500, buttons: 2, bubbles: true }));
+        await pause();
+        expectRect(100, 120, 200, 160);
+        await drag(overlay(), [500, 450], [700, 600]);
+        expectRect(500, 450, 200, 150);
+      }],
+      ["失焦中止拖拽，后续移动不会继续改变选区", async () => {
+        await drag(overlay(), [100, 120], [300, 280]);
+        selection().dispatchEvent(new MouseEvent("mousedown", { clientX: 150, clientY: 150, buttons: 1, bubbles: true }));
+        window.dispatchEvent(new Event("blur"));
+        window.dispatchEvent(new MouseEvent("mousemove", { clientX: 500, clientY: 500, buttons: 1, bubbles: true }));
+        await pause();
+        expectRect(100, 120, 200, 160);
+      }],
+      ["Esc 只取消当前会话，输入法组字时不取消", async () => {
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }));
+        assert(calls.length === 0, "输入法组字时不应取消截图");
+        window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        await pause();
+        assert(calls.length === 1 && calls[0].command === "capture_cancel" && calls[0].args.session === 12, "应只取消本会话一次");
+      }],
+    ];
+    const result = { passed: 0, total: scenarios.length, failures: [] };
+    for (const [scenario, run] of scenarios) {
+      try { await reset(); await run(); result.passed++; } catch (error) { result.failures.push({ scenario, message: error.message }); }
+    }
+    root.unmount();
+    const output = document.createElement("pre");
+    output.id = "result";
+    output.textContent = JSON.stringify(result);
+    document.body.append(output);
+  </script>
+</body>
+</html>

@@ -1,4 +1,16 @@
 html, body, #root { width: 100%; height: 100%; margin: 0; overflow: hidden; background: transparent; }
 body { font-family: "SF Pro Text", "PingFang SC", -apple-system, sans-serif; -webkit-user-select: none; user-select: none; }
 .capture-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, 0.28); cursor: crosshair; }
-.capture-hint { position: absolute; top: 50%; left: 50%; margin: 0; padding: 8px 14px; border-radius: 8px; color: #fff; background: rgba(0, 0, 0, 0.55); font-size: 13px; transform: translate(-50%, -50%); pointer-events: none; }
+.capture-overlay.has-selection { background: transparent; }
+.capture-hint { position: absolute; z-index: 1; top: 24px; left: 50%; margin: 0; padding: 8px 14px; border-radius: 8px; color: #fff; background: rgba(0, 0, 0, 0.55); font-size: 13px; transform: translateX(-50%); pointer-events: none; }
+.capture-selection { position: absolute; box-sizing: border-box; border: 1px solid #65c7ff; box-shadow: 0 0 0 10000px rgba(0, 0, 0, 0.28); cursor: move; }
+.capture-size { position: absolute; z-index: 1; padding: 4px 8px; border-radius: 4px; color: #fff; background: rgba(0, 0, 0, 0.7); font-size: 12px; white-space: nowrap; pointer-events: none; }
+.capture-handle { position: absolute; width: 10px; height: 10px; box-sizing: border-box; border: 1px solid #65c7ff; background: #fff; transform: translate(-50%, -50%); }
+.capture-handle-nw { left: 0; top: 0; cursor: nwse-resize; }
+.capture-handle-n { left: 50%; top: 0; cursor: ns-resize; }
+.capture-handle-ne { left: 100%; top: 0; cursor: nesw-resize; }
+.capture-handle-e { left: 100%; top: 50%; cursor: ew-resize; }
+.capture-handle-se { left: 100%; top: 100%; cursor: nwse-resize; }
+.capture-handle-s { left: 50%; top: 100%; cursor: ns-resize; }
+.capture-handle-sw { left: 0; top: 100%; cursor: nesw-resize; }
+.capture-handle-w { left: 0; top: 50%; cursor: ew-resize; }

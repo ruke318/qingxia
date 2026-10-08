@@ -80,6 +80,9 @@ pub fn ensure(app: &AppHandle) -> Result<Access, String> {
             objc2_core_graphics::CGRequestScreenCaptureAccess();
         }
         Access::Denied => {
+            // 授权记录被清除或签名变化后，需要重新登记，轻匣才会出现在系统设置的列表里；已登记时系统不再弹窗。
+            #[cfg(target_os = "macos")]
+            objc2_core_graphics::CGRequestScreenCaptureAccess();
             #[cfg(target_os = "macos")]
             if let Err(error) = std::process::Command::new("open")
                 .arg("x-apple.systempreferences:com.apple.preference.security?Privacy_ScreenCapture")

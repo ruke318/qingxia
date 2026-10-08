@@ -12,6 +12,7 @@ import { createServer } from "vite";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const pages = [
+  "tests/capture-overlay.browser.html",
   "tests/plugin-manager.browser.html",
   "tests/shortcut-settings.browser.html",
   "plugins/json-tools/tests/editor.browser.html",

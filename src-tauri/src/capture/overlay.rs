@@ -63,6 +63,7 @@ pub fn open(app: &AppHandle, session: u64) -> Result<usize, String> {
         panel.set_becomes_key_only_if_needed(false);
         panel.set_hides_on_deactivate(false);
         panel.set_works_when_modal(true);
+        panel.set_released_when_closed(false);
         let native = panel.as_panel();
         if let Err(error) = panel.set_style_mask(native.styleMask() | NSWindowStyleMask::NonactivatingPanel) {
             crate::diag!("截图覆盖窗设置非激活标志失败：{error:?}");
@@ -106,8 +107,10 @@ pub fn close_all(app: &AppHandle) {
     let labels: Vec<String> = app.webview_windows().into_keys().filter(|label| label.starts_with(LABEL_PREFIX)).collect();
     for label in &labels {
         #[cfg(target_os = "macos")]
-        if let Some(panel) = tauri_nspanel::ManagerExt::remove_webview_panel(app, label) {
+        if let Ok(panel) = tauri_nspanel::ManagerExt::get_webview_panel(app, label) {
             panel.as_panel().orderOut(None);
+            // 恢复 Tauri 原来的窗口类型与所有权，再交给运行时销毁。
+            panel.to_window();
         }
         if let Some(window) = app.get_webview_window(label) {
             if let Err(error) = window.destroy() { crate::diag!("关闭截图覆盖窗 {label} 失败：{error}"); }

@@ -107,6 +107,23 @@ npm run tauri -- build --bundles app
 
 构建出的应用使用本地临时签名（ad-hoc），拷到 `/Applications` 即可使用。首次访问桌面、文稿、下载目录时，系统会请求授权。
 
+临时签名每次构建都会变化，macOS 会把新构建当作另一个应用，**截图所需的“屏幕录制”授权在重新构建后失效**。经常自行构建时，建议在钥匙串中创建一个本地代码签名证书，构建时用环境变量指定，授权一次即可长期有效：
+
+```sh
+# 一次性：生成自签名代码签名证书并导入登录钥匙串（名称可自定）
+openssl req -x509 -newkey rsa:2048 -sha256 -days 3650 -nodes -keyout key.pem -out cert.pem \
+  -subj "/CN=Qingbox Local Development" -addext "basicConstraints=critical,CA:false" \
+  -addext "keyUsage=critical,digitalSignature" -addext "extendedKeyUsage=critical,codeSigning"
+openssl pkcs12 -export -legacy -inkey key.pem -in cert.pem -out id.p12 -passout pass:临时密码
+security import id.p12 -k ~/Library/Keychains/login.keychain-db -P 临时密码 -T /usr/bin/codesign
+rm key.pem cert.pem id.p12
+
+# 之后每次构建
+APPLE_SIGNING_IDENTITY="Qingbox Local Development" npm run tauri -- build --bundles app
+```
+
+如果之前用临时签名授权过，先执行 `tccutil reset ScreenCapture local.qingbox.desktop` 清除旧记录（只影响轻匣），再重新授权一次。
+
 ### 构建外部插件
 
 ```sh
