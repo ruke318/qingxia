@@ -1,6 +1,6 @@
 import { drawAnnotations, type Annotation } from "./annotations";
 
-// 把选区按物理像素合成为 PNG。之后的标注、马赛克也画在同一张 canvas 上，复制与保存始终使用这一份扁平结果。
+// 把选区按物理像素合成为 PNG。标注与蒙层画在同一张 canvas 上，复制与保存始终使用这一份扁平结果。
 
 export type Rect = { x: number; y: number; width: number; height: number };
 

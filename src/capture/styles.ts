@@ -5,7 +5,7 @@ export type ToolStyle = { color: string; size: Size; wavy: boolean };
 export type ToolStyles = Record<Tool, ToolStyle>;
 
 const KEY = "qingbox.capture.styles";
-const TOOLS: Tool[] = ["rect", "line", "arrow", "pen", "text", "step", "mosaic", "cover"];
+const TOOLS: Tool[] = ["rect", "line", "arrow", "pen", "text", "step", "blur", "cover"];
 
 export function defaultStyles(): ToolStyles {
   const base: ToolStyle = { color: COLORS[0], size: 1, wavy: false };

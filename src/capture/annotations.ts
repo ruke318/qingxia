@@ -1,11 +1,11 @@
 // 截图标注：数据结构、绘制与命中检测。坐标为覆盖窗的逻辑坐标（与选区相同）；
 // 屏幕预览与导出共用同一套绘制函数，导出结果与所见一致。
 
-export type Tool = "rect" | "line" | "arrow" | "pen" | "text" | "step" | "mosaic" | "cover";
+export type Tool = "rect" | "line" | "arrow" | "pen" | "text" | "step" | "blur" | "cover";
 export type Size = 0 | 1 | 2;
 type Base = { id: number; color: string; size: Size };
 export type Annotation =
-  | (Base & { kind: "rect" | "mosaic" | "cover"; x: number; y: number; width: number; height: number })
+  | (Base & { kind: "rect" | "blur" | "cover"; x: number; y: number; width: number; height: number })
   | (Base & { kind: "arrow"; x1: number; y1: number; x2: number; y2: number })
   | (Base & { kind: "line"; x1: number; y1: number; x2: number; y2: number; wavy: boolean })
   | (Base & { kind: "pen"; points: [number, number][] })
@@ -16,7 +16,8 @@ export const COLORS = ["#e5484d", "#f5a524", "#30a46c", "#3b82f6", "#1f2328", "#
 const STROKE = [2, 4, 6];
 export const FONT = [14, 18, 24];
 const STEP_RADIUS = [11, 14, 18];
-const MOSAIC_BLOCK = [6, 10, 16];
+/** 蒙层每个采样点覆盖的逻辑尺寸，越大越模糊。 */
+const BLUR_SAMPLE = [6, 10, 16];
 export const TEXT_FONT_FAMILY = '"PingFang SC", -apple-system, sans-serif';
 
 /** 步骤序号按出现顺序编号，删除中间的标记后其余自动重排。 */
@@ -52,7 +53,7 @@ function textBox(item: Extract<Annotation, { kind: "text" }>, measure?: CanvasRe
 /** 标注的外接矩形。 */
 export function bounds(item: Annotation): { x: number; y: number; width: number; height: number } {
   switch (item.kind) {
-    case "rect": case "mosaic": case "cover": return { x: item.x, y: item.y, width: item.width, height: item.height };
+    case "rect": case "blur": case "cover": return { x: item.x, y: item.y, width: item.width, height: item.height };
     case "arrow": return normalize(item.x1, item.y1, item.x2, item.y2);
     case "line": {
       // 波浪线有起伏，外接矩形向外留出振幅
@@ -115,7 +116,7 @@ export function translate(item: Annotation, dx: number, dy: number): Annotation 
 
 /**
  * 在 `context` 上绘制全部标注。`context` 的坐标变换须已设为逻辑坐标；
- * `snapshot` 为本屏快照，`snapshotRatio` 为快照像素与逻辑坐标之比，马赛克从快照取像素。
+ * `snapshot` 为本屏快照，`snapshotRatio` 为快照像素与逻辑坐标之比，蒙层从快照取像素。
  */
 export function drawAnnotations(context: CanvasRenderingContext2D, annotations: Annotation[], snapshot: HTMLImageElement | null, snapshotRatio: number) {
   for (const item of annotations) {
@@ -132,8 +133,8 @@ export function drawAnnotations(context: CanvasRenderingContext2D, annotations: 
       case "cover":
         context.fillRect(item.x, item.y, item.width, item.height);
         break;
-      case "mosaic":
-        drawMosaic(context, item, snapshot, snapshotRatio);
+      case "blur":
+        drawBlur(context, item, snapshot, snapshotRatio);
         break;
       case "arrow":
         drawArrow(context, item.x1, item.y1, item.x2, item.y2, STROKE[item.size]);
@@ -204,29 +205,34 @@ function drawArrow(context: CanvasRenderingContext2D, x1: number, y1: number, x2
   context.fill();
 }
 
-/** 马赛克：把快照对应区域缩小到每格一个像素，再不平滑地放大回去；导出时这块像素被真正替换。 */
-function drawMosaic(context: CanvasRenderingContext2D, item: { x: number; y: number; width: number; height: number; size: Size }, snapshot: HTMLImageElement | null, ratio: number) {
+/** 蒙层：把快照对应区域缩小后平滑放大，得到毛玻璃式模糊，再叠一层淡白色；导出时这块像素被真正替换。 */
+function drawBlur(context: CanvasRenderingContext2D, item: { x: number; y: number; width: number; height: number; size: Size }, snapshot: HTMLImageElement | null, ratio: number) {
   if (item.width < 1 || item.height < 1) return;
-  if (!snapshot) {
-    context.fillStyle = "rgba(128, 128, 128, 0.9)";
-    context.fillRect(item.x, item.y, item.width, item.height);
-    return;
-  }
-  const block = MOSAIC_BLOCK[item.size];
-  const columns = Math.max(1, Math.ceil(item.width / block));
-  const rows = Math.max(1, Math.ceil(item.height / block));
-  const small = document.createElement("canvas");
-  small.width = columns;
-  small.height = rows;
-  const tiny = small.getContext("2d");
-  if (!tiny) return;
-  // 按格放大后可能超出框选范围，先裁剪
   context.beginPath();
-  context.rect(item.x, item.y, item.width, item.height);
+  context.roundRect(item.x, item.y, item.width, item.height, 4);
   context.clip();
-  tiny.imageSmoothingEnabled = true;
-  tiny.drawImage(snapshot, item.x * ratio, item.y * ratio, item.width * ratio, item.height * ratio, 0, 0, columns, rows);
-  context.imageSmoothingEnabled = false;
-  context.drawImage(small, 0, 0, columns, rows, item.x, item.y, columns * block, rows * block);
-  context.imageSmoothingEnabled = true;
+  if (snapshot) {
+    // 分两步缩小再平滑放大，过渡更柔和，不出现方块
+    const sample = BLUR_SAMPLE[item.size];
+    const columns = Math.max(1, Math.round(item.width / sample));
+    const rows = Math.max(1, Math.round(item.height / sample));
+    const middle = document.createElement("canvas");
+    middle.width = Math.max(columns, Math.round(item.width / 3));
+    middle.height = Math.max(rows, Math.round(item.height / 3));
+    const small = document.createElement("canvas");
+    small.width = columns;
+    small.height = rows;
+    const first = middle.getContext("2d"), second = small.getContext("2d");
+    if (first && second) {
+      first.imageSmoothingQuality = "high";
+      first.drawImage(snapshot, item.x * ratio, item.y * ratio, item.width * ratio, item.height * ratio, 0, 0, middle.width, middle.height);
+      second.imageSmoothingQuality = "high";
+      second.drawImage(middle, 0, 0, columns, rows);
+      context.imageSmoothingEnabled = true;
+      context.imageSmoothingQuality = "high";
+      context.drawImage(small, 0, 0, columns, rows, item.x, item.y, item.width, item.height);
+    }
+  }
+  context.fillStyle = snapshot ? "rgba(255, 255, 255, 0.18)" : "rgba(200, 200, 200, 0.95)";
+  context.fillRect(item.x, item.y, item.width, item.height);
 }

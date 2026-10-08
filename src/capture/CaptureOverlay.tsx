@@ -51,7 +51,7 @@ const TOOLS: [Tool, string, ReactNode][] = [
   ["pen", "画笔", <path key="i" d="M4 15c2.5-.5 3.5-6 6.5-7s3 3.5 5.5 2.5" />],
   ["text", "文字", <path key="i" d="M5 5h10M10 5v11M8 16h4" />],
   ["step", "步骤序号", <><circle key="c" cx="10" cy="10" r="6.5" /><path key="n" d="M9 8.2l1.4-1V13" /></>],
-  ["mosaic", "马赛克", <path key="i" className="filled" d="M4 4h4v4H4zM12 4h4v4h-4zM8 8h4v4H8zM4 12h4v4H4zM12 12h4v4h-4z" />],
+  ["blur", "蒙层", <><rect key="r" x="3.5" y="5" width="13" height="10" rx="2" /><path key="l" d="M6.5 8.5h7M6.5 11.5h4.5" opacity="0.45" /></>],
   ["cover", "实色遮盖", <path key="i" className="filled" d="M3.5 6h13v8h-13z" />],
 ];
 const SIZE_NAMES = ["细", "中", "粗"] as const;
@@ -83,7 +83,7 @@ export function CaptureOverlay() {
   // 开始标注后固定选区，避免标注与画面错位
   const locked = tool !== null || annotations.length > 0;
 
-  // 马赛克预览与导出都要读取快照像素，以匿名 CORS 方式单独加载
+  // 蒙层预览与导出都要读取快照像素，以匿名 CORS 方式单独加载
   useEffect(() => {
     if (!context?.image) return;
     let active = true;
@@ -218,7 +218,7 @@ export function CaptureOverlay() {
         next = { ...item, x2, y2 };
       } else if (item.kind === "pen") {
         next = { ...item, points: [...item.points, [point.x, point.y]] };
-      } else if (item.kind === "rect" || item.kind === "mosaic" || item.kind === "cover") {
+      } else if (item.kind === "rect" || item.kind === "blur" || item.kind === "cover") {
         next = { ...item, ...normalize(current.start.x, current.start.y, point.x, point.y) };
       } else return true;
       current.item = next;
@@ -437,12 +437,12 @@ export function CaptureOverlay() {
               </button>
               {styleTool && currentStyle && (
                 <div className={`capture-style${panelAbove ? " above" : ""}`} role="group" aria-label="颜色与粗细" onMouseDown={(event) => event.preventDefault()}>
-                  {styleTool !== "mosaic" && COLORS.map((value) => (
+                  {styleTool !== "blur" && COLORS.map((value) => (
                     <button key={value} type="button" className="capture-color" aria-label={`颜色 ${value}`} aria-pressed={currentStyle.color === value} style={{ background: value }} onClick={() => applyStyle({ color: value })} />
                   ))}
-                  {styleTool !== "mosaic" && <span className="capture-separator" />}
+                  {styleTool !== "blur" && <span className="capture-separator" />}
                   {SIZE_NAMES.map((name, index) => (
-                    <button key={name} type="button" className="capture-size-option" aria-label={`${styleTool === "text" ? "字号" : "粗细"}：${name}`} aria-pressed={currentStyle.size === index} onClick={() => applyStyle({ size: index as Size })}>
+                    <button key={name} type="button" className="capture-size-option" aria-label={`${styleTool === "text" ? "字号" : styleTool === "blur" ? "模糊" : "粗细"}：${name}`} aria-pressed={currentStyle.size === index} onClick={() => applyStyle({ size: index as Size })}>
                       {styleTool === "text" ? <b style={{ fontSize: 10 + index * 3 }}>A</b> : <span style={{ width: 4 + index * 4, height: 4 + index * 4 }} />}
                     </button>
                   ))}

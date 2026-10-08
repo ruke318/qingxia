@@ -205,14 +205,15 @@
         const [, , blue] = pixels.getImageData((200 - 50) * 2, (180 - 50) * 2, 1, 1).data;
         assert(blue > 200, "矩形以外保持原画面");
       }],
-      ["马赛克在导出结果中改写像素", async () => {
+      ["蒙层在导出结果中模糊改写像素", async () => {
         await drag(overlay(), [50, 50], [250, 200]);
-        tool("马赛克").click();
+        tool("蒙层").click();
         await pause();
-        assert(!document.querySelector('[aria-label="颜色 #e5484d"]'), "马赛克不需要颜色");
+        assert(!document.querySelector('[aria-label="颜色 #e5484d"]'), "蒙层不需要颜色");
+        assert(document.querySelector('[aria-label="模糊：中"]'), "蒙层用模糊强度代替粗细");
         await drag(selection(), [85, 85], [125, 125]);
         const [r, , b] = (await exported()).getImageData((100 - 50) * 2, (100 - 50) * 2, 1, 1).data;
-        assert(r > 60 && b > 60, `红蓝交界处应被马赛克混合，实际 ${r},${b}`);
+        assert(r > 60 && b > 60, `红蓝交界处应被模糊混合，实际 ${r},${b}`);
       }],
       ["步骤序号依次放置，选中删除后可撤销", async () => {
         await drag(overlay(), [50, 50], [450, 300]);
