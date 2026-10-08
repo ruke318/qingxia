@@ -4,6 +4,7 @@
 //! 每个会话有递增编号，异步回调携带编号推进状态，会话已取消或被新会话取代时，迟到的回调直接丢弃。
 pub mod overlay;
 pub mod permission;
+pub mod screenshot;
 
 use std::sync::Mutex;
 
@@ -101,6 +102,11 @@ impl CaptureState {
         Ok(true)
     }
 
+    /// 指定会话当前所处阶段；不是当前会话时返回 `None`。
+    fn phase_of(&self, id: u64) -> Option<Phase> {
+        self.session.lock().ok().filter(|session| session.id == id).map(|session| session.phase)
+    }
+
     /// 当前会话是否进行中；主面板的失焦收起、抢回焦点等逻辑据此避让。
     pub fn active(&self) -> bool {
         self.session.lock().is_ok_and(|session| session.phase != Phase::Idle)
@@ -147,20 +153,44 @@ pub fn start_screenshot(app: &AppHandle) -> Result<(), String> {
     if let Some(window) = app.get_window("main") {
         if window.is_visible().unwrap_or(false) { crate::hide_panel(&window, "开始截图")?; }
     }
-    // 快照（SC14）接入前，覆盖窗显示的是实时画面。
-    if let Err(error) = overlay::open(app, id) {
-        overlay::close_all(app);
-        state.advance(id, Event::Fail)?;
-        return Err(error);
-    }
-    state.advance(id, Event::Ready)?;
+    // 冻结画面：全部屏幕截完后再打开覆盖窗，覆盖窗不会出现在快照中。
+    let handle = app.clone();
+    let started = std::time::Instant::now();
+    screenshot::capture(move |result| {
+        let app = handle.clone();
+        let elapsed = started.elapsed().as_millis();
+        if let Err(error) = handle.run_on_main_thread(move || present(&app, id, result, elapsed)) {
+            crate::diag!("截图：调度覆盖窗失败：{error}");
+        }
+    });
     Ok(())
+}
+
+/// 快照完成后打开覆盖窗。会话已取消或被新会话取代时丢弃快照。
+fn present(app: &AppHandle, id: u64, result: Result<Vec<screenshot::Snapshot>, String>, elapsed: u128) {
+    if app.state::<CaptureState>().phase_of(id) != Some(Phase::Preparing) {
+        crate::diag!("截图：会话 {id} 已结束，丢弃迟到的快照");
+        return;
+    }
+    let outcome = result.and_then(|snapshots| {
+        crate::diag!("截图：会话 {id} 取得 {} 块屏幕快照，用时 {elapsed} 毫秒", snapshots.len());
+        screenshot::store(id, snapshots);
+        overlay::open(app, id)
+    });
+    match outcome {
+        Ok(_) => { let _ = app.state::<CaptureState>().advance(id, Event::Ready); }
+        Err(error) => {
+            if let Err(cause) = finish(app, id, Event::Fail, &error) { crate::diag!("结束截图失败：{cause}"); }
+            crate::show_launcher_with(app, Some(&format!("截图失败：{error}")));
+        }
+    }
 }
 
 /// 结束指定会话并关闭覆盖窗；会话已结束或已被新会话取代时什么也不做。
 fn finish(app: &AppHandle, id: u64, event: Event, reason: &str) -> Result<(), String> {
     if !app.state::<CaptureState>().advance(id, event)? { return Ok(()) }
     overlay::close_all(app);
+    screenshot::clear();
     crate::diag!("截图：会话 {id} 结束（{reason}）");
     Ok(())
 }

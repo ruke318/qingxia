@@ -513,6 +513,10 @@ pub fn run() {
         .register_uri_scheme_protocol("qingbox-plugin", |context, request| {
             plugins::resource(context.app_handle(), context.webview_label(), request.uri().path())
         })
+        // 截图快照只交给本会话的覆盖窗。
+        .register_uri_scheme_protocol("qingbox-capture", |context, request| {
+            capture::screenshot::serve(context.webview_label(), request.uri().path())
+        })
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
             let path = database_path(app.handle()).map_err(|error| tauri::Error::Anyhow(anyhow::anyhow!(error)))?;

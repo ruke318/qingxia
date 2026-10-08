@@ -34,7 +34,7 @@
       }
     }],
     "security": {
-      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data:; connect-src ipc: http://ipc.localhost; frame-src qingbox-plugin:"
+      "csp": "default-src 'self'; script-src 'self'; style-src 'self' 'unsafe-inline'; img-src 'self' data: qingbox-capture:; connect-src ipc: http://ipc.localhost; frame-src qingbox-plugin:"
     }
   },
   "bundle": {

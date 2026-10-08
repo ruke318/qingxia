@@ -44,6 +44,16 @@ pub fn open(app: &AppHandle, session: u64) -> Result<usize, String> {
     for (index, screen) in screens.iter().enumerate() {
         let frame = screen.frame();
         let label = label(session, index);
+        // 按显示器编号取本屏快照；deviceDescription 自 macOS 10 起可用，CGDirectDisplayID 属性要到 macOS 26。
+        let display = screen
+            .deviceDescription()
+            .objectForKey(&objc2_foundation::NSString::from_str("NSScreenNumber"))
+            .and_then(|value| value.downcast::<objc2_foundation::NSNumber>().ok())
+            .map(|number| number.unsignedIntValue())
+            .unwrap_or(0);
+        let scale = super::screenshot::info(session, display);
+        let image = scale.map(|_| format!("\"qingbox-capture://localhost/{session}/{display}.png\"")).unwrap_or_else(|| "null".into());
+        if scale.is_none() { crate::diag!("截图：显示器 {display} 没有快照，覆盖窗显示实时画面"); }
         let window = WebviewWindowBuilder::new(app, &label, WebviewUrl::App("capture.html".into()))
             .title("轻匣截图")
             .decorations(false)
@@ -54,7 +64,10 @@ pub fn open(app: &AppHandle, session: u64) -> Result<usize, String> {
             .visible(false)
             .accept_first_mouse(true)
             .inner_size(frame.size.width, frame.size.height)
-            .initialization_script(format!("window.__QINGBOX_CAPTURE__ = {{ session: {session}, screen: {index} }};"))
+            .initialization_script(format!(
+                "window.__QINGBOX_CAPTURE__ = {{ session: {session}, screen: {index}, display: {display}, scale: {}, image: {image} }};",
+                scale.unwrap_or_else(|| screen.backingScaleFactor()),
+            ))
             .build()
             .map_err(|error| format!("创建截图覆盖窗失败：{error}"))?;
         let panel = window

@@ -1,9 +1,9 @@
 import { useEffect, useRef, useState, type MouseEvent as ReactMouseEvent } from "react";
 import { invoke, isTauri } from "@tauri-apps/api/core";
 
-/** 宿主创建覆盖窗时注入的会话编号与屏幕序号。 */
+/** 宿主创建覆盖窗时注入：会话编号、屏幕序号、显示器编号、物理像素比例，以及本屏冻结快照的地址（没有快照时为 null）。 */
 declare global {
-  interface Window { __QINGBOX_CAPTURE__?: { session: number; screen: number } }
+  interface Window { __QINGBOX_CAPTURE__?: { session: number; screen: number; display?: number; scale?: number; image?: string | null } }
 }
 
 type Point = { x: number; y: number };
@@ -25,6 +25,7 @@ const pointOf = (event: { clientX: number; clientY: number }): Point => ({
 /** 每屏独立的选区交互；快照、窗口吸附与标注仍由后续任务接入。 */
 export function CaptureOverlay() {
   const context = window.__QINGBOX_CAPTURE__;
+  const scale = context?.scale ?? window.devicePixelRatio ?? 1;
   const [selection, setSelection] = useState<Rect | null>(null);
   const drag = useRef<Drag | null>(null);
 
@@ -94,6 +95,8 @@ export function CaptureOverlay() {
 
   const visible = selection && selection.width > 0 && selection.height > 0;
   return (
+    <>
+    {context?.image && <img className="capture-snapshot" src={context.image} alt="" draggable={false} />}
     <main className={`capture-overlay${visible ? " has-selection" : ""}`} aria-label="截图" onMouseDown={(event) => begin(event, "draw")}>
       <p className="capture-hint">{visible ? "拖动选区移动 · 拖动边角调整 · Esc 取消" : "拖动选择区域 · Esc 取消"}</p>
       {visible && (
@@ -104,10 +107,12 @@ export function CaptureOverlay() {
             ))}
           </div>
           <output className="capture-size" aria-label="选区尺寸" style={{ left: clamp(selection.x, window.innerWidth - 130), top: selection.y >= 32 ? selection.y - 30 : selection.y + 8 }}>
-            {Math.round(selection.width)} × {Math.round(selection.height)}
+            {/* 显示截出图片的实际像素，Retina 屏为逻辑尺寸的两倍 */}
+            {Math.round(selection.width * scale)} × {Math.round(selection.height * scale)}
           </output>
         </>
       )}
     </main>
+    </>
   );
 }
