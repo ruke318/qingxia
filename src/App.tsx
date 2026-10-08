@@ -1,66 +1,21 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { getSettings, hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, onSettingsChanged, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, saveShortcut, saveFullscreenShortcut, toggleFullscreen, onFullscreenToggle, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
-import type { AppSettings, PluginCommand, PluginResult, SearchResult } from "./lib/types";
+import { hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, toggleFullscreen, onFullscreenToggle, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
+import type { PluginCommand, PluginResult, SearchResult } from "./lib/types";
 import { FileIcon } from "./components/FileIcon";
 import { ApplicationIcon } from "./components/ApplicationIcon";
 import { PluginIcon } from "./components/PluginIcon";
 import { PluginManager } from "./features/plugins/PluginManager";
 import { PluginFrame } from "./features/plugins/PluginFrame";
+import { ShortcutSettings } from "./features/shortcuts/ShortcutSettings";
 import { fileType } from "./lib/file-types";
 
-const KEY_LABELS: Record<string, string> = { Super: "⌘", Command: "⌘", Control: "⌃", Alt: "⌥", Shift: "⇧", Space: "空格" };
+type SettingsTab = "shortcuts" | "plugins";
 
-function ShortcutRecorder({ label, value, onChange, onEscape }: { label: string; value: string; onChange: (value: string) => void; onEscape: () => void }) {
-  return (
-    <>
-      <span className="shortcut-label">{label}</span>
-      <label className="shortcut-recorder" title="点击后按下新的组合键">
-        <input
-          className="shortcut-input"
-          aria-label={label}
-          readOnly
-          value={value}
-          onKeyDown={(event) => {
-            if (event.key === "Tab") return;
-            if (event.key === "Escape") { event.preventDefault(); event.stopPropagation(); onEscape(); return; }
-            event.preventDefault();
-            const parts = [event.metaKey ? "Super" : "", event.ctrlKey ? "Control" : "", event.altKey ? "Alt" : "", event.shiftKey ? "Shift" : ""]
-              .filter(Boolean);
-            if (["Meta", "Control", "Alt", "Shift"].includes(event.key)) return;
-            const key = event.code.startsWith("Key") ? event.code.slice(3) : event.code.startsWith("Digit") ? event.code.slice(5) : event.code === "Space" ? "Space" : event.key;
-            if (parts.length) onChange([...parts, key].join("+"));
-          }}
-        />
-        <span className="shortcut-keycaps" aria-hidden="true">{value.split("+").map((key, index) => <kbd key={index}>{KEY_LABELS[key] ?? key}</kbd>)}</span>
-      </label>
-    </>
-  );
-}
-
-function ShortcutSettings({ initial, onClose }: { initial: AppSettings; onClose: () => void }) {
-  const [shortcut, setShortcut] = useState(initial.shortcut);
-  const [fullscreen, setFullscreen] = useState(initial.fullscreenShortcut);
-  const [status, setStatus] = useState<string | null>(initial.shortcutError);
-  const [saving, setSaving] = useState(false);
-
-  async function submit() {
-    setSaving(true);
-    setStatus(null);
-    try {
-      await saveShortcut(shortcut.trim());
-      const next = await saveFullscreenShortcut(fullscreen.trim());
-      setShortcut(next.shortcut);
-      setFullscreen(next.fullscreenShortcut);
-      setStatus("快捷键已启用");
-    } catch (error) {
-      setStatus(error instanceof Error ? error.message : String(error));
-    } finally {
-      setSaving(false);
-    }
-  }
-
+function SettingsPanel({ onClose }: { onClose: () => void }) {
+  const [tab, setTab] = useState<SettingsTab>("shortcuts");
+  const tabs: [SettingsTab, string][] = [["shortcuts", "快捷键"], ["plugins", "插件"]];
   return (
     <section className="settings-panel" aria-label="轻匣设置">
       <div className="settings-toolbar">
@@ -68,14 +23,13 @@ function ShortcutSettings({ initial, onClose }: { initial: AppSettings; onClose:
           <button className="icon-button" onClick={onClose} aria-label="返回主入口"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5" /></svg></button>
           <h1>设置</h1>
         </div>
-        {status && <p role="status" title={status} className={status.includes("失败") || status.includes("请") || status.includes("不") ? "setting-status error" : "setting-status"}>{status}</p>}
-        <div className="shortcut-controls">
-          <ShortcutRecorder label="唤起快捷键" value={shortcut} onChange={setShortcut} onEscape={onClose} />
-          <ShortcutRecorder label="插件全屏" value={fullscreen} onChange={setFullscreen} onEscape={onClose} />
-          <button className="shortcut-save" aria-label="保存快捷键" disabled={saving} onClick={() => void submit()}>{saving ? "保存中…" : "保存"}</button>
+        <div className="settings-tabs" role="tablist" aria-label="设置分类">
+          {tabs.map(([id, label]) => <button key={id} role="tab" id={`settings-tab-${id}`} aria-selected={tab === id} aria-controls="settings-tab-panel" onClick={() => setTab(id)}>{label}</button>)}
         </div>
       </div>
-      <PluginManager />
+      <div id="settings-tab-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
+        {tab === "shortcuts" ? <ShortcutSettings /> : <PluginManager />}
+      </div>
     </section>
   );
 }
@@ -95,7 +49,7 @@ type View = "launcher" | "settings" | "plugin";
 /** 当前插件实例：同一时间只有一个 iframe；shown 为 Rust 显示该实例的次数。 */
 type ActivePlugin = { token: string; url: string; command?: string; shown: number };
 
-function Launcher({ view, settings, plugin, onSettings, onPlugin, onReturn }: { view: View; settings: AppSettings; plugin: ActivePlugin | null; onSettings: () => void; onPlugin: () => void; onReturn: () => void }) {
+function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View; plugin: ActivePlugin | null; onSettings: () => void; onPlugin: () => void; onReturn: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLParagraphElement>(null);
@@ -275,7 +229,7 @@ function Launcher({ view, settings, plugin, onSettings, onPlugin, onReturn }: { 
         <input ref={inputRef} autoFocus autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} value={query} onChange={(event) => { if (view !== "launcher") onReturn(); setQuery(event.target.value); }} onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd} onKeyDown={handleKeyDown} placeholder="搜索插件、应用、文件或目录…" aria-label="搜索应用、文件或目录" role="combobox" aria-autocomplete="list" aria-controls={view === "launcher" && items.length ? "search-results" : undefined} aria-expanded={view === "launcher" && items.length > 0} aria-activedescendant={view === "launcher" && items.length ? `result-${activeIndex}` : undefined} />
         <button className="settings-trigger" onClick={() => { void openSettings(); onSettings(); }} aria-label="设置" aria-expanded={view === "settings"}>⌘,</button>
       </div>
-      {view === "settings" && <div className="content-area"><ShortcutSettings initial={settings} onClose={onReturn} /></div>}
+      {view === "settings" && <div className="content-area"><SettingsPanel onClose={onReturn} /></div>}
       {(view === "plugin" || plugin) && <div className="content-area plugin-content" aria-label="插件内容区域" hidden={view !== "plugin"}>
         {plugin && <PluginFrame key={plugin.token} token={plugin.token} url={plugin.url} command={plugin.command} shown={plugin.shown} />}
       </div>}
@@ -297,17 +251,14 @@ function Launcher({ view, settings, plugin, onSettings, onPlugin, onReturn }: { 
 
 export default function App() {
   const [view, setView] = useState<View>("launcher");
-  const [settings, setSettings] = useState<AppSettings>({ shortcut: "Alt+Space", fullscreenShortcut: "Control+Super+F", shortcutError: null });
   const [plugin, setPlugin] = useState<ActivePlugin | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
 
   useEffect(() => {
-    void getSettings().then(setSettings);
     let cancelled = false;
     const disposers: (() => void)[] = [];
     void Promise.all([
-      onSettingsChanged((next) => { if (!cancelled) setSettings(next); }),
       onShowSettings(() => setView("settings")),
       // 新令牌到达即替换 iframe；显示与作废只认当前令牌
       onPluginLoad(({ token, url, command }) => setPlugin({ token, url, command, shown: 0 })),
@@ -338,7 +289,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleEscape);
   }, [view]);
 
-  return <Launcher view={view} settings={settings} plugin={plugin} onSettings={() => setView("settings")} onPlugin={() => setView("plugin")} onReturn={() => {
+  return <Launcher view={view} plugin={plugin} onSettings={() => setView("settings")} onPlugin={() => setView("plugin")} onReturn={() => {
     void leavePlugin();
     setView("launcher");
   }} />;

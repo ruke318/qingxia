@@ -1,0 +1,159 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>快捷键设置回归检查</title></head>
+<body style="margin:0;width:720px">
+  <div id="root"></div>
+  <script type="module">
+    // 模拟宿主：命令调用与事件监听都经 __TAURI_INTERNALS__，不连接真实应用
+    const row = (id, group, title, extra = {}) => ({ id, group, title, scope: "global", defaultValue: null, suggested: null, saved: null, active: null, enabled: true, error: null, ...extra });
+    let rows = [
+      row("launcher", "轻匣", "唤起轻匣", { defaultValue: "Alt+Space", saved: "Alt+Space", active: "Alt+Space" }),
+      row("fullscreen", "轻匣", "插件全屏", { scope: "panel", defaultValue: "Super+Control+F", saved: "Super+Shift+F", active: "Super+Shift+F" }),
+      // 旧版本保存的非规范写法，用来检查组合与顺序无关
+      row("clipboard-history:open", "剪贴板", "剪贴板", { suggested: "Alt+Shift+V", saved: "Shift+Alt+V", active: "Shift+Alt+V" }),
+      row("json-tools:open", "格式化编辑器", "格式化编辑器", { suggested: "Alt+J" }),
+      row("crypto-tools:encode", "编码工具", "编码 / 解码"),
+      row("crypto-tools:hash", "编码工具", "哈希", { saved: "Super+Alt+H", error: "快捷键注册失败，可能已被系统或其他应用占用" }),
+      row("qr-tools:open", "二维码", "二维码", { saved: "Alt+Q", enabled: false }),
+    ];
+    const calls = [];
+    const callbacks = new Map();
+    const listeners = new Map();
+    let nextCallback = 1;
+    let failSave = null;
+    const copy = () => JSON.parse(JSON.stringify(rows));
+    globalThis.isTauri = true;
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener() {} };
+    window.__TAURI_INTERNALS__ = {
+      transformCallback(callback) { const id = nextCallback++; callbacks.set(id, callback); return id; },
+      invoke(command, args) {
+        calls.push({ command, args });
+        if (command === "begin_search_session") return Promise.resolve(1);
+        if (command === "plugin:event|listen") {
+          listeners.set(args.event, [...(listeners.get(args.event) ?? []), args.handler]);
+          return Promise.resolve(args.handler);
+        }
+        if (command === "plugin:event|unlisten" || command === "set_shortcut_recording") return Promise.resolve(null);
+        if (command === "list_shortcuts") return Promise.resolve(copy());
+        if (command === "save_shortcut_binding") {
+          if (failSave) return Promise.reject(failSave);
+          rows = rows.map((item) => item.id === args.id ? { ...item, saved: args.shortcut, active: args.shortcut, error: null } : item);
+          return Promise.resolve(copy());
+        }
+        throw new Error(`测试收到意外命令：${command}`);
+      },
+    };
+    const emit = (event, payload) => (listeners.get(event) ?? []).forEach((id) => callbacks.get(id)({ event, id: 0, payload }));
+
+    const React = await import("react");
+    const { createRoot } = await import("react-dom/client");
+    const { ShortcutSettings } = await import("../src/features/shortcuts/ShortcutSettings.tsx");
+    createRoot(document.getElementById("root")).render(React.createElement(ShortcutSettings));
+
+    const pause = () => new Promise((resolve) => setTimeout(resolve, 10));
+    async function until(check, message) {
+      const deadline = Date.now() + 3000;
+      while (!check()) { if (Date.now() > deadline) throw new Error(message); await pause(); }
+    }
+    function assert(value, message) { if (!value) throw new Error(message); }
+    const rowOf = (label) => document.querySelector(`[aria-label="${label}快捷键"]`)?.closest(".shortcut-row");
+    const input = (label) => rowOf(label).querySelector("input");
+    const status = (label) => rowOf(label).querySelector(".shortcut-status").textContent;
+    const keys = (label) => [...rowOf(label).querySelectorAll("kbd")].map((item) => item.textContent).join("");
+    const button = (label, text) => [...rowOf(label).querySelectorAll("button")].find((item) => item.textContent.startsWith(text));
+    const press = (label, code, modifiers = {}, key = code) => input(label).dispatchEvent(new KeyboardEvent("keydown", { key, code, bubbles: true, cancelable: true, ...modifiers }));
+    const recordingCalls = () => calls.filter((call) => call.command === "set_shortcut_recording").map((call) => call.args.recording);
+
+    const result = { passed: 0, total: 9, failures: [] };
+    const scenarios = [
+      ["按插件分组列出全部命令", async () => {
+        await until(() => rowOf("二维码"), "未列出快捷键");
+        const groups = [...document.querySelectorAll(".shortcut-group h3")].map((item) => item.textContent);
+        assert(groups.join("|") === "轻匣|插件", `分组不正确：${groups.join("|")}`);
+        assert(rowOf("编码工具 · 哈希").querySelector(".shortcut-title").textContent === "编码工具哈希", "多命令插件应在插件名后标出命令");
+        assert(rowOf("剪贴板").querySelector(".shortcut-title").textContent === "剪贴板", "单命令插件只显示插件名");
+        const left = [...document.querySelectorAll(".shortcut-field")].map((item) => Math.round(item.getBoundingClientRect().left));
+        assert(new Set(left).size === 1, `各行录制框应左对齐：${left.join(",")}`);
+        assert(document.querySelectorAll(".shortcut-row").length === 7, "多命令插件应分行列出");
+        assert(rowOf("编码工具 · 哈希"), "多命令插件的行名称应带命令标题");
+        assert(rowOf("插件全屏").textContent.includes("面板内"), "全屏应标注只在面板内生效");
+      }],
+      ["各行状态与可用操作", async () => {
+        assert(input("二维码").disabled && status("二维码") === "插件已停用，未生效", "停用插件应不可编辑并标注未生效");
+        assert(status("编码工具 · 哈希").includes("注册失败"), "注册失败原因应显示在该行");
+        assert(button("插件全屏", "恢复默认"), "与默认值不同时应提供恢复默认");
+        assert(!button("唤起轻匣", "恢复默认") && !button("唤起轻匣", "清除"), "默认值未改动时不提供恢复默认，唤起不能清除");
+        assert(!button("剪贴板", "建议"), "已保存值与建议值顺序不同但组合相同，不应再提示建议");
+        assert(button("格式化编辑器", "建议")?.textContent === "建议 ⌥J", "应显示插件建议的快捷键");
+        assert(keys("剪贴板") === "⌥⇧V", `键帽应按规范顺序显示：${keys("剪贴板")}`);
+      }],
+      ["录制时通知宿主并识别顺序不同的重复组合", async () => {
+        input("格式化编辑器").focus();
+        await until(() => recordingCalls().at(-1) === true, "聚焦后应通知宿主开始录制");
+        press("格式化编辑器", "KeyV", { altKey: true, shiftKey: true }, "◊");
+        await until(() => status("格式化编辑器") === "已被「剪贴板」使用", `未识别重复组合：${status("格式化编辑器")}`);
+        assert(button("格式化编辑器", "保存").disabled, "组合重复时不能保存");
+        input("格式化编辑器").blur();
+        await until(() => recordingCalls().at(-1) === false, "失焦后应通知宿主结束录制");
+        button("格式化编辑器", "取消").click();
+        await until(() => !button("格式化编辑器", "保存"), "取消后应丢弃草稿");
+      }],
+      ["录制已注册的全局组合由宿主回报", async () => {
+        input("格式化编辑器").focus();
+        await pause();
+        emit("shortcut-recorded", "Alt+Space");
+        await until(() => status("格式化编辑器") === "已被「唤起轻匣」使用", `未处理宿主回报的组合：${status("格式化编辑器")}`);
+        press("格式化编辑器", "Escape", {}, "Escape");
+        await until(() => !button("格式化编辑器", "保存"), "Esc 应取消草稿");
+      }],
+      ["只按 ⇧ 时提示需要主要修饰键", async () => {
+        input("格式化编辑器").focus();
+        press("格式化编辑器", "KeyF", { shiftKey: true }, "F");
+        await until(() => status("格式化编辑器").includes("需要包含"), "未提示需要 ⌘、⌃ 或 ⌥");
+        assert(!button("格式化编辑器", "保存"), "无效组合不应产生草稿");
+        input("格式化编辑器").blur();
+      }],
+      ["保存后按宿主返回刷新该行", async () => {
+        input("格式化编辑器").focus();
+        press("格式化编辑器", "KeyJ", { altKey: true }, "∆");
+        await until(() => button("格式化编辑器", "保存") && !button("格式化编辑器", "保存").disabled, "有效组合应可保存");
+        button("格式化编辑器", "保存").click();
+        await until(() => status("格式化编辑器") === "已保存", "保存后应提示已保存");
+        const request = calls.findLast((call) => call.command === "save_shortcut_binding");
+        assert(request.args.id === "json-tools:open" && request.args.shortcut === "Alt+J", `保存参数不正确：${JSON.stringify(request.args)}`);
+        assert(keys("格式化编辑器") === "⌥J" && !button("格式化编辑器", "建议"), "保存后应显示新值，建议与已保存值相同时不再提示");
+      }],
+      ["保存失败在该行显示原因", async () => {
+        failSave = "快捷键注册失败：测试占用";
+        input("编码工具 · 编码 / 解码").focus();
+        press("编码工具 · 编码 / 解码", "KeyE", { ctrlKey: true, altKey: true }, "´");
+        await until(() => button("编码工具 · 编码 / 解码", "保存"), "未产生草稿");
+        button("编码工具 · 编码 / 解码", "保存").click();
+        await until(() => status("编码工具 · 编码 / 解码") === "快捷键注册失败：测试占用", "失败原因应显示在该行");
+        assert(button("编码工具 · 编码 / 解码", "保存") && !button("编码工具 · 编码 / 解码", "保存").disabled, "失败后保留草稿以便重试");
+        failSave = null;
+        button("编码工具 · 编码 / 解码", "取消").click();
+      }],
+      ["清除插件快捷键", async () => {
+        button("剪贴板", "清除").click();
+        await until(() => status("剪贴板") === "已清除", "清除后应提示");
+        const request = calls.findLast((call) => call.command === "save_shortcut_binding");
+        assert(request.args.id === "clipboard-history:open" && request.args.shortcut === null, "清除应传 null");
+        assert(rowOf("剪贴板").textContent.includes("未设置"), "清除后应显示未设置");
+      }],
+      ["其他入口修改后自动刷新", async () => {
+        rows = rows.map((item) => item.id === "json-tools:open" ? { ...item, saved: "Alt+K", active: "Alt+K" } : item);
+        emit("shortcuts-changed");
+        await until(() => keys("格式化编辑器") === "⌥K", "收到变更通知后应重新读取");
+      }],
+    ];
+    for (const [scenario, run] of scenarios) {
+      try { await run(); result.passed++; } catch (error) { result.failures.push({ scenario, message: error.message }); }
+    }
+    const output = document.createElement("pre");
+    output.id = "result";
+    output.textContent = JSON.stringify(result);
+    document.body.append(output);
+  </script>
+</body>
+</html>

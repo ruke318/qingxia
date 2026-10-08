@@ -8,7 +8,6 @@ use serde::Serialize;
 use serde_json::{json, Value};
 use std::{collections::BTreeMap, path::PathBuf, sync::Mutex};
 use tauri::{AppHandle, Emitter, Manager, State, Webview};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
 
 #[derive(Clone)]
 struct Plugin {
@@ -31,7 +30,6 @@ struct Instance {
 pub struct PluginState {
     plugins: Mutex<BTreeMap<String, Plugin>>,
     active: Mutex<Option<Instance>>,
-    shortcuts: Mutex<BTreeMap<String, String>>,
 }
 
 /// 插件资源响应的 CSP（方案 10.2，PL11 实测）：沙箱不透明来源下 `'self'` 不匹配，只能写完整源。
@@ -253,54 +251,14 @@ pub fn resource(app: &AppHandle, label: &str, path: &str) -> tauri::http::Respon
         .body(body).expect("构造插件资源响应失败")
 }
 
-fn read_shortcut(app: &AppHandle, command: &str) -> Result<Option<String>, String> {
-    app.state::<crate::AppState>().database.lock().map_err(|_| "插件数据库不可用")?
-        .query_row("SELECT value FROM settings WHERE key = ?1", params![format!("plugin_shortcut:{command}")], |row| row.get(0))
-        .optional().map_err(|error| format!("读取插件快捷键失败：{error}"))
-}
-
-fn register_shortcut(app: &AppHandle, command: &str, shortcut: &str) -> Result<(), String> {
-    if app.global_shortcut().is_registered(shortcut) { return Err("快捷键已被轻匣其他命令占用".into()) }
-    let key = command.to_string();
-    let command = command.to_string();
-    app.global_shortcut().on_shortcut(shortcut, move |app, _, event| {
-        if event.state() == ShortcutState::Pressed { let _ = open_plugin(app.clone(), command.clone()); }
-    }).map_err(|error| format!("快捷键注册失败：{error}"))?;
-    app.state::<PluginState>().shortcuts.lock().map_err(|_| "快捷键状态不可用")?.insert(key, shortcut.to_string());
-    Ok(())
-}
-
-fn save_shortcut(app: &AppHandle, command: &str, shortcut: Option<&str>) -> Result<(), String> {
-    let _guard = app.state::<crate::AppState>();
-    let _guard = _guard.shortcut_update.lock().map_err(|_| "快捷键状态不可用")?;
-    let next = shortcut.map(str::trim).filter(|value| !value.is_empty());
-    let old = app.state::<PluginState>().shortcuts.lock().map_err(|_| "快捷键状态不可用")?.get(command).cloned();
-    if read_shortcut(app, command)?.as_deref() == next && old.as_deref() == next { return Ok(()) }
-    if let Some(next) = next { register_shortcut(app, command, next)?; }
-    let result = (|| -> Result<(), String> {
-        let state = app.state::<crate::AppState>();
-        let mut database = state.database.lock().map_err(|_| "插件数据库不可用")?;
-        let transaction = database.transaction().map_err(|error| format!("保存插件快捷键失败：{error}"))?;
-        let key = format!("plugin_shortcut:{command}");
-        if let Some(next) = next {
-            transaction.execute("INSERT INTO settings(key,value) VALUES(?1,?2) ON CONFLICT(key) DO UPDATE SET value=excluded.value", params![key,next])
-        } else { transaction.execute("DELETE FROM settings WHERE key=?1", params![key]) }.map_err(|error| format!("保存插件快捷键失败：{error}"))?;
-        let old_registered = old.as_deref().filter(|value| *value != next.unwrap_or(""));
-        if let Some(old) = old_registered { app.global_shortcut().unregister(old).map_err(|error| format!("解除旧快捷键失败：{error}"))?; }
-        if let Err(error) = transaction.commit() {
-            if let Some(old) = old_registered { register_shortcut(app, command, old)?; }
-            return Err(format!("保存插件快捷键失败：{error}"));
-        }
-        Ok(())
-    })();
-    if result.is_err() {
-        if let Some(next) = next { let _ = app.global_shortcut().unregister(next); }
-        let mut bindings = app.state::<PluginState>().shortcuts.lock().map_err(|_| "快捷键状态不可用")?.clone();
-        bindings.remove(command);
-        if let Some(old) = old.filter(|value| app.global_shortcut().is_registered(value.as_str())) { bindings.insert(command.to_string(), old); }
-        *app.state::<PluginState>().shortcuts.lock().map_err(|_| "快捷键状态不可用")? = bindings;
-    } else if next.is_none() { app.state::<PluginState>().shortcuts.lock().map_err(|_| "快捷键状态不可用")?.remove(command); }
-    result
+/// 已启用插件命令的显示名称，用于快捷键冲突提示；单命令插件只显示插件名。命令不存在或插件未启用时为 `None`。
+pub fn command_label(app: &AppHandle, command: &str) -> Option<String> {
+    let (plugin_id, command_id) = command.split_once(':')?;
+    let state = app.state::<PluginState>();
+    let plugins = state.plugins.lock().ok()?;
+    let plugin = plugins.get(plugin_id)?;
+    let entry = plugin.manifest.commands.iter().find(|entry| entry.id == command_id)?;
+    Some(if plugin.manifest.commands.len() == 1 { plugin.manifest.name.clone() } else { format!("{} · {}", plugin.manifest.name, entry.title) })
 }
 
 /// 插件网关：只接受主页面转发的调用，插件身份只由实例令牌决定。
@@ -375,7 +333,7 @@ pub async fn plugin_call(app: AppHandle, webview: Webview, token: String, method
             if value.len() > 16 * 1024 * 1024 { return Err(invalid("草稿超过 16 MB，无法保存")) }
             database.execute("INSERT INTO plugin_data(plugin_id,key,value) VALUES(?1,?2,?3) ON CONFLICT(plugin_id,key) DO UPDATE SET value=excluded.value", params![instance.plugin_id,key,value]).map_err(|error| format!("保存插件数据失败：{error}"))?;
         }
-        "shortcuts.get" => { return Ok(json!(read_shortcut(&app, &command)?)); }
+        "shortcuts.get" => { return Ok(json!(crate::shortcuts::saved(&app, &command)?)); }
         "shortcuts.set" => {
             let shortcut = params["shortcut"].as_str().map(str::to_string);
             let handle = app.clone();
@@ -383,7 +341,7 @@ pub async fn plugin_call(app: AppHandle, webview: Webview, token: String, method
             let (sender, receiver) = tokio::sync::oneshot::channel();
             app.run_on_main_thread(move || {
                 let valid = handle.state::<PluginState>().active.lock().map(|active| active.as_ref().is_some_and(|current| current.token == token)).unwrap_or(false);
-                let result = if valid { save_shortcut(&handle, &command, shortcut.as_deref()).map_err(CallError::from) } else { Err(CallError::new("permission_denied", "插件实例已失效")) };
+                let result = if valid { crate::shortcuts::save(&handle, &command, shortcut.as_deref()).map_err(CallError::from) } else { Err(CallError::new("permission_denied", "插件实例已失效")) };
                 let _ = sender.send(result);
             }).map_err(|error| format!("调度快捷键保存失败：{error}"))?;
             receiver.await.map_err(|_| "快捷键保存已取消")??;

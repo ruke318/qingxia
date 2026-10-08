@@ -1,5 +1,5 @@
 use super::{
-    install::{install_directory, remove_directory}, manifest::{load_icon, load_plugin}, read_shortcut, register_shortcut, Plugin,
+    install::{install_directory, remove_directory}, manifest::{load_icon, load_plugin}, Plugin,
     PluginState,
 };
 use rusqlite::{params, OptionalExtension};
@@ -9,7 +9,6 @@ use std::{
     path::PathBuf,
 };
 use tauri::{AppHandle, Emitter, Manager, Webview};
-use tauri_plugin_global_shortcut::GlobalShortcutExt;
 
 #[derive(Clone, Serialize)]
 #[serde(rename_all = "camelCase")]
@@ -152,22 +151,9 @@ fn scan(app: &AppHandle) -> Result<Vec<Discovered>, String> {
 
 pub(super) fn reload_on_main(app: &AppHandle) -> Result<Vec<PluginInfo>, String> {
     let discovered = scan(app)?;
-    let app_state = app.state::<crate::AppState>();
-    let _shortcuts = app_state
-        .shortcut_update
-        .lock()
-        .map_err(|_| "快捷键状态不可用")?;
+    let _shortcuts = crate::shortcuts::lock_updates(app)?;
+    crate::shortcuts::release_commands_locked(app)?;
     let state = app.state::<PluginState>();
-    let previous = state.shortcuts.lock().map_err(|_| "快捷键状态不可用")?.clone();
-    let mut removed: Vec<(String, String)> = Vec::new();
-    for (id, shortcut) in previous {
-        if app.global_shortcut().unregister(shortcut.as_str()).is_err() {
-            for (id, shortcut) in &removed { let _ = register_shortcut(app, id, shortcut); }
-            return Err("解除旧插件快捷键失败，插件未重新加载".into());
-        }
-        removed.push((id, shortcut));
-    }
-    state.shortcuts.lock().map_err(|_| "快捷键状态不可用")?.clear();
     // 禁用、重新加载都作废当前实例令牌，主页面据此销毁 iframe。
     let active = state.active.lock().map_err(|_| "插件状态不可用")?.take();
     if let Some(active) = active {
@@ -176,24 +162,39 @@ pub(super) fn reload_on_main(app: &AppHandle) -> Result<Vec<PluginInfo>, String>
     }
     let mut plugins = BTreeMap::new();
     let mut infos = Vec::new();
-    for mut item in discovered {
+    for item in discovered {
         if item.info.enabled {
             if let Some(plugin) = item.plugin {
-                for command in &item.info.commands {
-                    if let Some(shortcut) = read_shortcut(app, &command.id)? {
-                        if let Err(error) = register_shortcut(app, &command.id, &shortcut) {
-                            item.info.error = Some(format!("快捷键未恢复：{error}"));
-                        }
-                    }
-                }
                 plugins.insert(item.info.id.clone(), plugin);
             }
         }
         infos.push(item.info);
     }
     *state.plugins.lock().map_err(|_| "插件目录不可用")? = plugins;
+    // 插件目录更新后再恢复快捷键，冲突提示才能显示插件名称；失败原因记录在对应命令上，不影响插件本身。
+    for info in infos.iter().filter(|info| info.enabled && info.error.is_none()) {
+        for command in &info.commands { crate::shortcuts::restore_locked(app, &command.id)?; }
+    }
     let _ = app.emit_to("main", "plugins-changed", ());
+    let _ = app.emit_to("main", "shortcuts-changed", ());
     Ok(infos)
+}
+
+/// 全部已安装插件（含已停用）的命令，供快捷键设置页列出；描述文件有误的插件没有命令。
+pub(crate) fn installed_commands(app: &AppHandle) -> Result<Vec<crate::shortcuts::InstalledCommand>, String> {
+    Ok(scan(app)?
+        .into_iter()
+        .filter_map(|item| item.plugin.map(|plugin| (item.info.enabled, plugin.manifest)))
+        .flat_map(|(enabled, manifest)| {
+            manifest.commands.iter().map(|command| crate::shortcuts::InstalledCommand {
+                id: format!("{}:{}", manifest.id, command.id),
+                title: command.title.clone(),
+                plugin_name: manifest.name.clone(),
+                enabled,
+                suggested: command.suggested_shortcut.clone(),
+            }).collect::<Vec<_>>()
+        })
+        .collect())
 }
 
 fn require_main(webview: &Webview) -> Result<(), String> {

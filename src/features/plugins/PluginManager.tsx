@@ -105,8 +105,11 @@ export function PluginManager() {
                   onClick={() => void perform(plugin.enabled ? "停用插件" : "启用插件", () => invoke<PluginInfo[]>("set_plugin_enabled", { id: plugin.id, enabled: !plugin.enabled }), plugin.id)}>
                   <span />
                 </button>
-                {plugin.source === "local" && <button type="button" className="plugin-manager-remove" disabled={disabled}
-                  aria-label={`移除${plugin.name}`} onClick={() => setRemoving(plugin.id)}>移除</button>}
+                {/* 固定宽度的移除位，内置插件留空，保证各行按钮对齐 */}
+                <span className="plugin-manager-slot">
+                  {plugin.source === "local" && <button type="button" className="plugin-manager-remove" disabled={disabled}
+                    aria-label={`移除${plugin.name}`} onClick={() => setRemoving(plugin.id)}>移除</button>}
+                </span>
               </div>
               {removing === plugin.id && <div className="plugin-manager-confirm" role="group" aria-label={`确认移除${plugin.name}`}>
                 <span>移除“{plugin.name}”？保留插件数据和原始导入目录。</span>

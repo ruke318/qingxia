@@ -40,6 +40,9 @@
         await until(remove, "本地插件缺少移除按钮");
         assert(!document.querySelector('[aria-label="移除JSON 编辑器"]'), "内置插件不应显示移除按钮");
         assert(getComputedStyle(remove()).color === "rgb(180, 35, 50)", "移除按钮应使用红色");
+        const opens = [...document.querySelectorAll(".plugin-manager-open")].map((item) => Math.round(item.getBoundingClientRect().left));
+        const switches = [...document.querySelectorAll(".plugin-manager-switch")].map((item) => Math.round(item.getBoundingClientRect().left));
+        assert(new Set(opens).size === 1 && new Set(switches).size === 1, `内置与本地插件的按钮应对齐：${opens.join(",")} / ${switches.join(",")}`);
       }],
       ["取消确认不会执行移除", async () => {
         remove().click();

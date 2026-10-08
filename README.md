@@ -33,7 +33,7 @@ https://github.com/user-attachments/assets/529072fc-3e34-4acc-8869-47c336f2e272
 
 ## ✨ 特性
 
-- **⚡ 一键唤起** - 默认 `⌥Space` 唤起、`Esc` 收起，快捷键可自定义；每个插件也能单独绑定全局快捷键
+- **⚡ 一键唤起** - 默认 `⌥Space` 唤起、`Esc` 收起；设置页“快捷键”栏集中管理唤起、插件全屏和每个插件命令的全局快捷键，重复组合当场提示
 - **🔍 应用、文件、目录一起搜** - 结合 Spotlight 索引与常用目录的实时检索，新文件也能搜到；应用优先并显示系统图标
 - **📂 目录直达** - 输入路径直接列出目录内容，`Tab` 补全，`⌘↵` 在访达中显示
 - **🪟 原生质感** - macOS 26 及以上使用与系统聚焦搜索相同的 Liquid Glass 材质，插件与主入口共用同一块玻璃
@@ -169,6 +169,7 @@ npm run test:qr        # 二维码
 npm run test:timestamp # 时间戳
 npm run test:sdk       # 插件 SDK
 npm run test:bridge    # 插件通信
+npm run test:shortcuts # 快捷键组合规范化与录制
 npm run test:colors    # 检查插件样式没有写死颜色
 npm run test:browser   # 颜色检查 + 各插件的浏览器回归测试（需要 Chrome，可用 CHROME_PATH 指定路径）
 cd src-tauri && cargo test

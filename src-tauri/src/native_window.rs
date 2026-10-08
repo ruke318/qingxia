@@ -225,10 +225,11 @@ fn bring_to_front(native: &NSPanel, main_thread: MainThreadMarker) {
 /// 应用不激活时系统“编辑”菜单不响应快捷键。面板为键盘焦点时截获单独的 ⌘X/C/V/A，
 /// 把剪切、复制、粘贴、全选发给当前焦点对象；⌘Z 等其余按键照常交给页面。
 /// 同时截获全屏快捷键（焦点在插件 iframe 内也能收到），交给主页面判断当前是否在插件视图。
+/// 设置页录制快捷键期间一律放行，按键交给录制框。
 fn install_edit_monitor(panel: Retained<NSPanel>, window: Window) {
     let handler = RcBlock::new(move |event: NonNull<NSEvent>| -> *mut NSEvent {
         let Some(main_thread) = MainThreadMarker::new() else { return event.as_ptr() };
-        if panel.isKeyWindow() {
+        if panel.isKeyWindow() && !crate::shortcuts::is_recording() {
             if is_fullscreen_shortcut(unsafe { event.as_ref() }) {
                 let _ = window.emit_to("main", "panel-fullscreen-toggle", ());
                 return std::ptr::null_mut();
@@ -336,15 +337,17 @@ fn on_main_thread(
         .map_err(|error| format!("调度原生窗口失败：{error}"))
 }
 
+/// 鼠标所在的屏幕；取不到时用第一块屏幕。
+fn mouse_screen(main_thread: MainThreadMarker) -> Option<Retained<NSScreen>> {
+    let mouse = NSEvent::mouseLocation();
+    let screens = NSScreen::screens(main_thread);
+    screens.iter().find(|screen| contains(screen.frame(), mouse)).or_else(|| screens.iter().next())
+}
+
 pub fn present(window: &Window, height: f64, event: &'static str) -> Result<(), String> {
     on_main_thread(window, move |target, native, main_thread| {
         let mouse = NSEvent::mouseLocation();
-        let screens = NSScreen::screens(main_thread);
-        let screen = screens
-            .iter()
-            .find(|screen| contains(screen.frame(), mouse))
-            .or_else(|| screens.iter().next());
-        let Some(screen) = screen else {
+        let Some(screen) = mouse_screen(main_thread) else {
             return;
         };
         // 全程使用 AppKit 的逻辑坐标，避免混合缩放显示器间的坐标换算错误。
@@ -389,6 +392,7 @@ pub fn hide_if_unfocused(window: &Window) -> Result<(), String> {
 fn hide_now(target: &Window, native: &NSPanel, main_thread: MainThreadMarker) {
     // 导入选择器、Hosts 授权会先收起面板再弹出系统界面，此时不能隐藏应用。
     let visible = native.isVisible();
+    crate::shortcuts::stop_recording();
     crate::plugins::hide_active(target.app_handle());
     let _ = target.hide();
     if visible {
@@ -439,10 +443,22 @@ pub fn present_plugin(window: &Window) -> Result<(), String> {
     on_main_thread(window, move |target, native, main_thread| {
         // 每次打开插件都从普通尺寸开始。
         let current = RESTORE_FRAME.take().unwrap_or_else(|| native.frame());
-        if let Some(screen) = native.screen() {
-            native.setFrame_display(expanded_frame(current, screen.visibleFrame(), 670.0), false);
+        if native.isVisible() {
+            // 从搜索框打开：面板已在用户眼前，原地向下展开。
+            if let Some(screen) = native.screen() {
+                native.setFrame_display(expanded_frame(current, screen.visibleFrame(), 670.0), false);
+            }
+            bring_to_front(native, main_thread);
+        } else if let Some(screen) = mouse_screen(main_thread) {
+            // 全局快捷键直接打开：面板原先隐藏，与唤起搜索框一样出现在鼠标所在的屏幕，而不是上次的位置。
+            let frame = launcher_frame(screen.frame(), screen.visibleFrame(), 670.0);
+            native.setFrame_display(expanded_frame(frame, screen.visibleFrame(), 670.0), false);
+            bring_to_front(native, main_thread);
+            let actual = native.frame();
+            native.setFrameOrigin(NSPoint::new(centered_x(screen.frame(), actual.size.width), actual.origin.y));
+        } else {
+            bring_to_front(native, main_thread);
         }
-        bring_to_front(native, main_thread);
         settle_later(target);
     })
 }

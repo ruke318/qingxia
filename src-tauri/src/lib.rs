@@ -7,50 +7,27 @@ mod search;
 mod plugins;
 mod hosts;
 mod clipboard;
+mod shortcuts;
 pub use hosts::run_helper;
 
 use std::{fs, path::PathBuf, sync::Mutex};
 
-use rusqlite::{params, Connection};
+use rusqlite::Connection;
 use tauri::{
     menu::{Menu, MenuItem, PredefinedMenuItem, Submenu},
     tray::TrayIconBuilder,
 };
-use tauri::{AppHandle, Emitter, Manager, State, Window, WindowEvent};
-use tauri_plugin_global_shortcut::{GlobalShortcutExt, ShortcutState};
+use tauri::{AppHandle, Manager, Window, WindowEvent};
+#[cfg(not(target_os = "macos"))]
+use tauri::Emitter;
 
-use crate::contracts::{AppSettings, FileResult, QueryResponse};
+use crate::contracts::{FileResult, QueryResponse};
 
-const DEFAULT_SHORTCUT: &str = "Alt+Space";
-const DEFAULT_FULLSCREEN_SHORTCUT: &str = "Control+Super+F";
 const LAUNCHER_HEIGHT: f64 = 60.0;
 const LAUNCHER_MIN_WIDTH: f64 = 900.0;
 
 struct AppState {
     database: Mutex<Connection>,
-    shortcut_error: Mutex<Option<String>>,
-    shortcut_update: Mutex<()>,
-}
-
-fn setting(state: &AppState, key: &str, default: &str) -> String {
-    state
-        .database
-        .lock()
-        .expect("设置数据库锁已中毒")
-        .query_row("SELECT value FROM settings WHERE key = ?1", params![key], |row| row.get::<_, String>(0))
-        .unwrap_or_else(|_| default.to_string())
-}
-
-fn settings_from_database(state: &AppState) -> AppSettings {
-    AppSettings {
-        shortcut: setting(state, "launcher_shortcut", DEFAULT_SHORTCUT),
-        fullscreen_shortcut: setting(state, "fullscreen_shortcut", DEFAULT_FULLSCREEN_SHORTCUT),
-        shortcut_error: state
-            .shortcut_error
-            .lock()
-            .expect("快捷键状态锁已中毒")
-            .clone(),
-    }
 }
 
 #[cfg(not(target_os = "macos"))]
@@ -76,6 +53,7 @@ fn position_launcher(window: &Window, height: f64) -> tauri::Result<()> {
 }
 
 fn show_launcher(app: &AppHandle) {
+    shortcuts::stop_recording();
     plugins::hide_active(app);
     if let Some(view) = app.get_webview("main") { let _ = view.set_focus(); }
     if let Some(window) = app.get_window("main") {
@@ -127,17 +105,6 @@ fn show_settings(app: &AppHandle) {
     }
 }
 
-fn register_launcher_shortcut(app: &AppHandle, shortcut: &str) -> Result<(), String> {
-    app.global_shortcut()
-        .on_shortcut(shortcut, move |handle, _, event| {
-            if event.state() == ShortcutState::Pressed {
-                show_launcher(handle);
-            }
-        })
-        .map_err(|error| format!("快捷键注册失败：{error}"))?;
-    Ok(())
-}
-
 fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
     let path = app
         .path()
@@ -145,87 +112,6 @@ fn database_path(app: &AppHandle) -> Result<PathBuf, String> {
         .map_err(|error| format!("无法取得应用数据目录：{error}"))?;
     fs::create_dir_all(&path).map_err(|error| format!("无法创建应用数据目录：{error}"))?;
     Ok(path.join("qingbox.sqlite3"))
-}
-
-#[tauri::command]
-fn get_settings(state: State<'_, AppState>) -> AppSettings {
-    settings_from_database(&state)
-}
-
-#[tauri::command]
-fn save_shortcut(
-    app: AppHandle,
-    state: State<'_, AppState>,
-    shortcut: String,
-) -> Result<AppSettings, String> {
-    let _update = state.shortcut_update.lock().map_err(|_| "快捷键状态不可用")?;
-    if shortcut.trim().is_empty() {
-        return Err("快捷键不能为空".to_string());
-    }
-    let next = shortcut.trim().to_string();
-    let current = settings_from_database(&state).shortcut;
-    if next == current && app.global_shortcut().is_registered(next.as_str()) {
-        return Ok(settings_from_database(&state));
-    }
-    if app.global_shortcut().is_registered(next.as_str()) {
-        return Err("快捷键已被轻匣其他命令占用".into());
-    }
-    register_launcher_shortcut(&app, &next)?;
-    let save_result = (|| -> Result<(), String> {
-        let mut database = state.database.lock().expect("设置数据库锁已中毒");
-        let transaction = database
-            .transaction()
-            .map_err(|error| format!("读取设置失败：{error}"))?;
-        transaction.execute(
-            "INSERT INTO settings(key, value) VALUES('launcher_shortcut', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-            params![next],
-        ).map_err(|error| format!("快捷键保存失败：{error}"))?;
-        let old_registered =
-            next != current && app.global_shortcut().is_registered(current.as_str());
-        if old_registered {
-            app.global_shortcut()
-                .unregister(current.as_str())
-                .map_err(|error| format!("旧快捷键释放失败：{error}"))?;
-        }
-        if let Err(error) = transaction.commit() {
-            if old_registered {
-                register_launcher_shortcut(&app, &current).map_err(|restore| {
-                    format!(
-                        "快捷键保存失败：{error}；恢复旧绑定失败：{restore}，请从菜单栏重新设置"
-                    )
-                })?;
-            }
-            return Err(format!("快捷键保存失败：{error}"));
-        }
-        Ok(())
-    })();
-    if let Err(error) = save_result {
-        let _ = app.global_shortcut().unregister(next.as_str());
-        return Err(error);
-    }
-    *state.shortcut_error.lock().expect("快捷键状态锁已中毒") = None;
-    let settings = settings_from_database(&state);
-    let _ = app.emit("settings-changed", &settings);
-    Ok(settings)
-}
-
-/// 插件全屏快捷键只在面板内生效，不注册为全局快捷键。
-#[tauri::command]
-fn save_fullscreen_shortcut(app: AppHandle, state: State<'_, AppState>, shortcut: String) -> Result<AppSettings, String> {
-    let next = shortcut.trim().to_string();
-    if next.is_empty() { return Err("快捷键不能为空".into()) }
-    if next == settings_from_database(&state).shortcut { return Err("不能与唤起快捷键相同".into()) }
-    #[cfg(target_os = "macos")]
-    let parsed = native_window::parse_shortcut(&next)?;
-    state.database.lock().expect("设置数据库锁已中毒").execute(
-        "INSERT INTO settings(key, value) VALUES('fullscreen_shortcut', ?1) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
-        params![next],
-    ).map_err(|error| format!("快捷键保存失败：{error}"))?;
-    #[cfg(target_os = "macos")]
-    native_window::set_fullscreen_shortcut(parsed);
-    let settings = settings_from_database(&state);
-    let _ = app.emit("settings-changed", &settings);
-    Ok(settings)
 }
 
 #[tauri::command]
@@ -238,6 +124,7 @@ fn toggle_fullscreen(window: Window) -> Result<(), String> {
 
 #[tauri::command]
 fn hide_launcher(window: Window) -> Result<(), String> {
+    shortcuts::stop_recording();
     plugins::hide_active(window.app_handle());
     window
         .hide()
@@ -606,6 +493,7 @@ pub fn run() {
             Menu::with_items(handle, &[&application, &edit])
         })
         .manage(plugins::PluginState::default())
+        .manage(shortcuts::ShortcutState::default())
         .register_uri_scheme_protocol("qingbox-plugin", |context, request| {
             plugins::resource(context.app_handle(), context.webview_label(), request.uri().path())
         })
@@ -614,12 +502,9 @@ pub fn run() {
             let path = database_path(app.handle()).map_err(|error| tauri::Error::Anyhow(anyhow::anyhow!(error)))?;
             let database = Connection::open(path).map_err(|error| tauri::Error::Anyhow(anyhow::anyhow!(error)))?;
             database.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)", []).map_err(|error| tauri::Error::Anyhow(anyhow::anyhow!(error)))?;
-            database.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('launcher_shortcut', ?1)", params![DEFAULT_SHORTCUT]).map_err(|error| tauri::Error::Anyhow(anyhow::anyhow!(error)))?;
-            app.manage(AppState { database: Mutex::new(database), shortcut_error: Mutex::new(None), shortcut_update: Mutex::new(()) });
-            let settings = settings_from_database(app.state::<AppState>().inner());
-            if let Err(error) = register_launcher_shortcut(app.handle(), &settings.shortcut) {
-                *app.state::<AppState>().shortcut_error.lock().expect("快捷键状态锁已中毒") = Some(error);
-            }
+            app.manage(AppState { database: Mutex::new(database) });
+            // 先恢复唤起与全屏，再加载插件，插件命令的快捷键不会抢占这两项。
+            shortcuts::initialize(app.handle()).map_err(anyhow::Error::msg)?;
             clipboard::initialize(app.handle()).map_err(anyhow::Error::msg)?;
             plugins::initialize(app.handle()).map_err(anyhow::Error::msg)?;
             let show = MenuItem::with_id(app, "show", "打开轻匣", true, None::<&str>)?;
@@ -640,18 +525,14 @@ pub fn run() {
                 if app.get_window("main").is_some() {
                     if let Some(webview) = app.get_webview_window("main") { native_window::prepare(&webview).map_err(anyhow::Error::msg)?; }
                 }
-                let fullscreen = settings_from_database(app.state::<AppState>().inner()).fullscreen_shortcut;
-                match native_window::parse_shortcut(&fullscreen).or_else(|_| native_window::parse_shortcut(DEFAULT_FULLSCREEN_SHORTCUT)) {
-                    Ok(shortcut) => native_window::set_fullscreen_shortcut(shortcut),
-                    Err(error) => eprintln!("全屏快捷键无效：{error}"),
-                }
             }
             show_launcher(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![get_settings, save_shortcut, save_fullscreen_shortcut, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
+        .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
         .on_window_event(|window, event| {
             if let WindowEvent::Focused(false) = event {
+                shortcuts::stop_recording();
                 #[cfg(target_os = "macos")]
                 let _ = native_window::hide_if_unfocused(window);
                 #[cfg(not(target_os = "macos"))]

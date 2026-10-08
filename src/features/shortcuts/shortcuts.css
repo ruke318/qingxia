@@ -1,0 +1,30 @@
+.shortcut-settings { padding-top: 4px; }
+.shortcut-intro { margin: 0 0 6px; color: rgba(42, 49, 59, 0.56); font-size: 11px; line-height: 1.6; }
+.shortcut-load-error { margin: 8px 0; padding: 8px 10px; border-radius: 7px; color: #a62d36; background: rgba(166, 45, 54, 0.06); font-size: 11px; line-height: 1.6; }
+.shortcut-group { margin-top: 14px; }
+.shortcut-group h3 { margin: 0 0 4px; color: rgba(42, 49, 59, 0.62); font-size: 11px; font-weight: 600; }
+.shortcut-group ul { list-style: none; margin: 0; padding: 0; }
+.shortcut-row { display: grid; grid-template-columns: 220px 168px minmax(0, 1fr) auto; align-items: center; gap: 12px; min-height: 42px; border-bottom: 1px solid rgba(42, 49, 59, 0.07); }
+.shortcut-group li:last-child { border-bottom: 0; }
+.shortcut-title { display: flex; align-items: baseline; gap: 8px; min-width: 0; overflow: hidden; font-size: 13px; white-space: nowrap; }
+.shortcut-title > span { flex-shrink: 0; }
+.shortcut-title small { min-width: 0; overflow: hidden; color: rgba(42, 49, 59, 0.5); font-size: 11px; text-overflow: ellipsis; }
+.shortcut-title .shortcut-tag { flex-shrink: 0; padding: 1px 5px; border-radius: 4px; color: rgba(42, 49, 59, 0.6); background: rgba(42, 49, 59, 0.06); font-size: 10px; }
+.shortcut-field { position: relative; display: grid; place-items: center; height: 30px; border: 1px solid rgba(42, 49, 59, 0.13); border-radius: 8px; background: rgba(255, 255, 255, 0.48); cursor: pointer; }
+.shortcut-field:hover { border-color: rgba(42, 49, 59, 0.27); }
+.shortcut-field.recording { border-color: #72998a; box-shadow: 0 0 0 2px rgba(114, 153, 138, 0.35); }
+.shortcut-field.dirty { background: rgba(227, 237, 230, 0.8); }
+.shortcut-field:has(input:disabled) { cursor: default; opacity: 0.55; }
+.shortcut-field-input { position: absolute; inset: 0; width: 100%; height: 100%; opacity: 0; cursor: inherit; }
+.shortcut-field-keys { display: flex; align-items: center; gap: 3px; pointer-events: none; }
+.shortcut-field-keys kbd { display: grid; place-items: center; min-width: 21px; height: 21px; padding: 0 5px; border-color: rgba(42, 49, 59, 0.13); border-radius: 4px; color: #363e46; background: #fafbfa; box-shadow: 0 1px 0 rgba(42, 49, 59, 0.08); font-family: inherit; font-size: 11px; }
+.shortcut-field-keys em { color: rgba(42, 49, 59, 0.45); font-size: 11px; font-style: normal; }
+.shortcut-status { min-width: 0; overflow: hidden; color: rgba(42, 49, 59, 0.56); font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.shortcut-status.error { color: #a62d36; }
+.shortcut-actions { display: flex; justify-content: flex-end; gap: 5px; }
+.shortcut-actions button { height: 26px; padding: 0 9px; border: 0; border-radius: 7px; color: inherit; background: rgba(42, 49, 59, 0.06); font-size: 11px; white-space: nowrap; }
+.shortcut-actions button:hover:not(:disabled) { background: rgba(42, 49, 59, 0.1); }
+.shortcut-actions .shortcut-primary { color: #365a4a; background: #e3ede6; }
+.shortcut-actions .shortcut-primary:hover:not(:disabled) { background: #d6e5dc; }
+.shortcut-actions button:disabled { cursor: default; opacity: 0.45; }
+.shortcut-actions button:focus-visible { outline: 2px solid #72998a; outline-offset: 2px; }

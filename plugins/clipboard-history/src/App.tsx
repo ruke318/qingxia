@@ -32,8 +32,22 @@ export default function App() {
 
   useEffect(() => {
     void qingbox.view.ready().catch((failure) => { setFeedback(message(failure)); setError(true); });
-    void qingbox.shortcuts.get().then((value) => setShortcut(value ?? "")).catch((failure) => { setFeedback(message(failure)); setError(true); });
+    void loadShortcut();
+    // 快捷键也可能在设置页修改，每次显示时重新读取
+    return qingbox.events.on("view.shown", () => void loadShortcut());
   }, []);
+
+  async function loadShortcut() {
+    try { const value = await qingbox.shortcuts.get() ?? ""; setShortcut(value); return value; }
+    catch (failure) { setFeedback(message(failure)); setError(true); return null; }
+  }
+
+  async function openShortcut() {
+    const value = await loadShortcut();
+    if (value === null) return;
+    setShortcutDraft(value);
+    setShortcutOpen(true);
+  }
 
   useEffect(() => {
     let active = true;
@@ -106,7 +120,7 @@ export default function App() {
   return <main className="clipboard-plugin">
     <header className="clipboard-toolbar">
       <div className="category-tabs" role="tablist" aria-label="剪贴板分类">{(Object.keys(names) as ClipboardCategory[]).map((value) => <button key={value} role="tab" aria-selected={kind === value} aria-controls="clipboard-records" onClick={() => changeKind(value)}><Icon kind={value} /><span>{names[value]}</span><small>{value === "all" ? counts.text + counts.image + counts.file : counts[value]}</small></button>)}</div>
-      <button className="shortcut-trigger" aria-label="剪贴板快捷键设置" title="设置全局快捷键" onClick={() => { setShortcutDraft(shortcut); setShortcutOpen(true); }}><span>{shortcut ? shortcutLabel(shortcut) : "设置快捷键"}</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 14h14" /><circle cx="7" cy="6" r="2" /><circle cx="13" cy="14" r="2" /></svg></button>
+      <button className="shortcut-trigger" aria-label="剪贴板快捷键设置" title="设置全局快捷键" onClick={() => void openShortcut()}><span>{shortcut ? shortcutLabel(shortcut) : "设置快捷键"}</span><svg viewBox="0 0 20 20" aria-hidden="true"><path d="M3 6h14M3 14h14" /><circle cx="7" cy="6" r="2" /><circle cx="13" cy="14" r="2" /></svg></button>
     </header>
     <section id="clipboard-records" className={`records ${kind === "image" ? "image-records" : ""}`} aria-label={`${names[kind]}历史`} aria-busy={loading}>
       {!items.length ? <div className="empty-state"><Icon kind={kind} /><strong>{loading ? "正在读取…" : `还没有${kind === "all" ? "剪贴板" : names[kind]}记录`}</strong><p>{kind === "all" ? "复制文字、图片或文件后，就会出现在这里。" : kind === "file" ? "在访达中复制文件后，就会出现在这里。" : kind === "image" ? "复制图片或截图到剪贴板后，就会出现在这里。" : "在任意应用中复制文字，就会出现在这里。"}</p></div> : items.map((item) => <button key={item.id} ref={(element) => { if (element) rows.current.set(item.id, element); else rows.current.delete(item.id); }} className={`record${selected === item.id ? " selected" : ""}${copied === item.id ? " copied" : ""}`} aria-label={`复制${names[item.kind]}：${item.preview.slice(0, 80)}`} aria-pressed={selected === item.id} disabled={copying} onClick={() => void copy(item)}>

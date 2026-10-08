@@ -1,6 +1,6 @@
 import { invoke, isTauri } from "@tauri-apps/api/core";
 import { listen } from "@tauri-apps/api/event";
-import type { AppSettings, PluginCommand, QueryResponse } from "./types";
+import type { PluginCommand, QueryResponse, ShortcutRow } from "./types";
 
 export const isDesktop = isTauri();
 let queryRequestId = 0;
@@ -22,19 +22,29 @@ export function nextQueryRequestId(): number {
   return ++queryRequestId;
 }
 
-export async function getSettings(): Promise<AppSettings> {
-  if (!isDesktop) return { shortcut: "Alt+Space", fullscreenShortcut: "Control+Super+F", shortcutError: null };
-  return invoke("get_settings");
+export async function listShortcuts(): Promise<ShortcutRow[]> {
+  return isDesktop ? invoke("list_shortcuts") : [];
 }
 
-export async function saveShortcut(shortcut: string): Promise<AppSettings> {
-  if (!isDesktop) throw new Error("请在桌面应用中设置全局快捷键");
-  return invoke("save_shortcut", { shortcut });
-}
-
-export async function saveFullscreenShortcut(shortcut: string): Promise<AppSettings> {
+/** 保存或清除一项快捷键（`null` 表示清除），返回保存后的全部行。 */
+export async function saveShortcutBinding(id: string, shortcut: string | null): Promise<ShortcutRow[]> {
   if (!isDesktop) throw new Error("请在桌面应用中设置快捷键");
-  return invoke("save_fullscreen_shortcut", { shortcut });
+  return invoke("save_shortcut_binding", { id, shortcut });
+}
+
+/** 录制期间宿主不执行已绑定的快捷键，改为经 `shortcut-recorded` 回报组合。 */
+export async function setShortcutRecording(recording: boolean): Promise<void> {
+  if (isDesktop) await invoke("set_shortcut_recording", { recording });
+}
+
+/** 录制时按下了轻匣已注册的全局快捷键，载荷为规范形式的组合。 */
+export async function onShortcutRecorded(callback: (shortcut: string) => void): Promise<() => void> {
+  return isDesktop ? listen<string>("shortcut-recorded", (event) => callback(event.payload)) : () => {};
+}
+
+/** 任一入口（设置页或插件）保存快捷键、插件重新加载后触发。 */
+export async function onShortcutsChanged(callback: () => void): Promise<() => void> {
+  return isDesktop ? listen("shortcuts-changed", callback) : () => {};
 }
 
 export async function toggleFullscreen(): Promise<void> {
@@ -73,11 +83,6 @@ export async function onLauncherFocus(callback: () => void): Promise<() => void>
 export async function onShowSettings(callback: () => void): Promise<() => void> {
   if (!isDesktop) return () => {};
   return listen("show-settings", callback);
-}
-
-export async function onSettingsChanged(callback: (settings: AppSettings) => void): Promise<() => void> {
-  if (!isDesktop) return () => {};
-  return listen<AppSettings>("settings-changed", (event) => callback(event.payload));
 }
 
 export async function queryFiles(query: string, requestId: number): Promise<QueryResponse> {
