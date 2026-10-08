@@ -30,6 +30,7 @@ fn observe_activation(window: &WebviewWindow) {
         let target = window.as_ref().window().clone();
         let block = RcBlock::new(move |_: NonNull<NSNotification>| {
             if MainThreadMarker::new().is_none() { return }
+            crate::diag!("应用{}，前台应用 {}", if activated { "激活" } else { "失去激活" }, frontmost_app());
             if !activated {
                 ACTIVATION_PENDING.set(false);
                 let _ = hide_if_unfocused(&target);
@@ -79,7 +80,7 @@ pub fn prepare(window: &WebviewWindow) -> Result<(), String> {
     panel.set_works_when_modal(true);
     // 初始化时固定非激活面板标志，让同一面板可反复进入其他应用的全屏空间。
     if let Err(error) = panel.set_style_mask(panel.as_panel().styleMask() | NSWindowStyleMask::NonactivatingPanel) {
-        eprintln!("设置非激活面板标志失败：{error:?}");
+        crate::diag!("设置非激活面板标志失败：{error:?}");
     }
     // 背景和材质在隐藏初始化阶段固定，唤起时只布局和显示。
     panel.as_panel().setOpaque(false);
@@ -204,8 +205,11 @@ fn settle_later(window: &Window) {
         let _ = on_main_thread(&target, |target, native, main_thread| {
             if !native.isVisible() || native.isKeyWindow() || settling() { return }
             native.makeKeyAndOrderFront(None);
-            if !native.isKeyWindow() && !NSApplication::sharedApplication(main_thread).isActive() {
-                hide_now(target, native, main_thread);
+            let key = native.isKeyWindow();
+            let active = NSApplication::sharedApplication(main_thread).isActive();
+            crate::diag!("过渡期复查：面板没有键盘焦点，重新获取后键盘焦点 {key}，应用激活 {active}");
+            if !key && !active {
+                hide_now(target, native, main_thread, "过渡期结束仍取不到键盘焦点");
             }
         });
     });
@@ -331,7 +335,7 @@ fn on_main_thread(
                 Ok(panel) => {
                     action(&target, panel.as_panel(), main_thread);
                 }
-                Err(error) => eprintln!("无法取得原生悬浮面板：{error:?}"),
+                Err(error) => crate::diag!("无法取得原生悬浮面板：{error:?}"),
             }
         })
         .map_err(|error| format!("调度原生窗口失败：{error}"))
@@ -365,13 +369,7 @@ pub fn present(window: &Window, height: f64, event: &'static str) -> Result<(), 
         ));
         let _ = target.emit(event, ());
         settle_later(target);
-        #[cfg(debug_assertions)]
-        {
-            let actual = native.frame();
-            let left = actual.origin.x - screen.frame().origin.x;
-            let right = screen.frame().size.width - left - actual.size.width;
-            eprintln!("主入口已唤起：实际宽 {:.0}，高 {:.0}，屏幕宽 {:.0}，左右留白 {:.1}/{:.1}，鼠标 ({:.0}, {:.0})，窗口 ({:.0}, {:.0})", actual.size.width, actual.size.height, screen.frame().size.width, left, right, mouse.x, mouse.y, actual.origin.x, actual.origin.y);
-        }
+        log_presented(native, main_thread, event, Some((mouse.x, mouse.y)));
     })
 }
 
@@ -379,19 +377,27 @@ pub fn hide_if_unfocused(window: &Window) -> Result<(), String> {
     on_main_thread(window, |target, native, main_thread| {
         // 过渡期内的失焦多为系统在应用间来回切换激活，不收起，重新取得键盘焦点。
         if settling() && native.isVisible() {
+            crate::diag!("失焦检查：仍在唤起过渡期，重新取得键盘焦点");
             native.makeKeyAndOrderFront(None);
             native.orderFrontRegardless();
             return;
         }
         // 激活过程中可能先收到 key 窗口变更；只有应用确实退到后台才自动隐藏。
-        let hide = !ACTIVATION_PENDING.get() && !NSApplication::sharedApplication(main_thread).isActive() && !native.isKeyWindow();
-        if hide { hide_now(target, native, main_thread) }
+        let pending = ACTIVATION_PENDING.get();
+        let active = NSApplication::sharedApplication(main_thread).isActive();
+        let key = native.isKeyWindow();
+        let hide = !pending && !active && !key;
+        if native.isVisible() {
+            crate::diag!("失焦检查：激活中 {pending}，应用激活 {active}，键盘焦点 {key} → {}", if hide { "收起" } else { "保持" });
+        }
+        if hide { hide_now(target, native, main_thread, "失焦自动收起") }
     })
 }
 
-fn hide_now(target: &Window, native: &NSPanel, main_thread: MainThreadMarker) {
+fn hide_now(target: &Window, native: &NSPanel, main_thread: MainThreadMarker, reason: &str) {
     // 导入选择器、Hosts 授权会先收起面板再弹出系统界面，此时不能隐藏应用。
     let visible = native.isVisible();
+    crate::diag!("收起面板：{reason}（收起前可见 {visible}）");
     crate::shortcuts::stop_recording();
     crate::plugins::hide_active(target.app_handle());
     let _ = target.hide();
@@ -460,7 +466,32 @@ pub fn present_plugin(window: &Window) -> Result<(), String> {
             bring_to_front(native, main_thread);
         }
         settle_later(target);
+        log_presented(native, main_thread, "plugin", None);
     })
+}
+
+/// 记录显示面板后的实际状态：是否可见、是否取得键盘焦点、所在屏幕与窗口位置。
+fn log_presented(native: &NSPanel, main_thread: MainThreadMarker, event: &str, mouse: Option<(f64, f64)>) {
+    let frame = native.frame();
+    let screen = native.screen().map(|screen| {
+        let area = screen.frame();
+        format!("({:.0}, {:.0}) {:.0}×{:.0}", area.origin.x, area.origin.y, area.size.width, area.size.height)
+    }).unwrap_or_else(|| "无".into());
+    let mouse = mouse.map(|(x, y)| format!("，鼠标 ({x:.0}, {y:.0})")).unwrap_or_default();
+    crate::diag!(
+        "显示面板（{event}）：可见 {}，键盘焦点 {}，应用激活 {}，屏幕 {screen}，窗口 ({:.0}, {:.0}) {:.0}×{:.0}{mouse}",
+        native.isVisible(), native.isKeyWindow(), NSApplication::sharedApplication(main_thread).isActive(),
+        frame.origin.x, frame.origin.y, frame.size.width, frame.size.height,
+    );
+}
+
+/// 当前前台应用的标识，用于判断快捷键是否被其他应用抢占；取不到时为“未知”。
+pub fn frontmost_app() -> String {
+    objc2_app_kit::NSWorkspace::sharedWorkspace()
+        .frontmostApplication()
+        .and_then(|application| application.bundleIdentifier().or_else(|| application.localizedName()))
+        .map(|name| name.to_string())
+        .unwrap_or_else(|| "未知".into())
 }
 
 #[cfg(test)]

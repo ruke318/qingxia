@@ -76,7 +76,9 @@ pub fn is_recording() -> bool {
 
 /// 面板隐藏、重新唤起时结束录制，避免快捷键一直处于只回报状态。
 pub fn stop_recording() {
-    RECORDING.store(false, Ordering::SeqCst);
+    if RECORDING.swap(false, Ordering::SeqCst) {
+        crate::diag!("快捷键录入结束（面板收起或重新唤起）");
+    }
 }
 
 /// 解析并校验组合键：至少包含 ⌘、⌃ 或 ⌥，否则会吞掉普通输入。
@@ -183,14 +185,20 @@ fn register_global(app: &AppHandle, id: &str, shortcut: Shortcut) -> Result<(), 
     app.global_shortcut()
         .on_shortcut(shortcut, move |app, pressed, event| {
             if event.state() != KeyState::Pressed { return }
+            #[cfg(target_os = "macos")]
+            let front = crate::native_window::frontmost_app();
+            #[cfg(not(target_os = "macos"))]
+            let front = "未知";
+            crate::diag!("快捷键 {} 按下 → {owner}，录入中 {}，前台应用 {front}", format(pressed), is_recording());
             if is_recording() {
                 // 只有面板仍在显示时才算录制中；面板已从任何途径收起，说明录制早已结束，按正常快捷键处理。
                 let visible = app.get_window("main").and_then(|window| window.is_visible().ok()).unwrap_or(false);
                 if visible {
-                    eprintln!("录制中按下 {}，只回报组合，不执行动作", format(pressed));
+                    crate::diag!("录入中，只回报组合，不执行动作");
                     let _ = app.emit_to("main", "shortcut-recorded", format(pressed));
                     return;
                 }
+                crate::diag!("面板已收起，结束残留的录入状态");
                 stop_recording();
             }
             if owner == LAUNCHER {
@@ -222,7 +230,11 @@ fn deactivate(app: &AppHandle, id: &str, shortcut: Shortcut) -> Result<(), Strin
 /// 先注册新组合，再写入设置，最后释放旧组合；任一步失败都撤销已完成的步骤，并如实报告撤销结果。
 pub fn save(app: &AppHandle, id: &str, text: Option<&str>) -> Result<(), String> {
     let _update = lock_updates(app)?;
-    save_locked(app, id, text)?;
+    if let Err(error) = save_locked(app, id, text) {
+        crate::diag!("快捷键保存失败：{id} = {}，{error}", text.unwrap_or("（清除）"));
+        return Err(error);
+    }
+    crate::diag!("快捷键已保存：{id} = {}", text.filter(|text| !text.trim().is_empty()).unwrap_or("（清除）"));
     let _ = app.emit_to("main", "shortcuts-changed", ());
     Ok(())
 }
@@ -295,10 +307,14 @@ pub fn restore_locked(app: &AppHandle, id: &str) -> Result<(), String> {
     })();
     match result {
         Ok(shortcut) => {
+            crate::diag!("快捷键已恢复：{id} = {}", format(&shortcut));
             lock(&shortcuts.active)?.insert(id.to_string(), shortcut);
             lock(&shortcuts.errors)?.remove(id);
         }
-        Err(error) => { lock(&shortcuts.errors)?.insert(id.to_string(), error); }
+        Err(error) => {
+            crate::diag!("快捷键未恢复：{id} = {text}，{error}");
+            lock(&shortcuts.errors)?.insert(id.to_string(), error);
+        }
     }
     Ok(())
 }
@@ -389,7 +405,9 @@ pub fn save_shortcut_binding(app: AppHandle, webview: Webview, id: String, short
 #[tauri::command]
 pub fn set_shortcut_recording(webview: Webview, recording: bool) -> Result<(), String> {
     require_main(&webview)?;
-    RECORDING.store(recording, Ordering::SeqCst);
+    if RECORDING.swap(recording, Ordering::SeqCst) != recording {
+        crate::diag!("快捷键录入{}", if recording { "开始" } else { "结束" });
+    }
     Ok(())
 }
 

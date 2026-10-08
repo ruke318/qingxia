@@ -1,6 +1,7 @@
 #[cfg(target_os = "macos")]
 mod application_icon;
 mod contracts;
+mod diag;
 #[cfg(target_os = "macos")]
 mod native_window;
 mod search;
@@ -59,7 +60,7 @@ fn show_launcher(app: &AppHandle) {
     if let Some(window) = app.get_window("main") {
         #[cfg(target_os = "macos")]
         if let Err(error) = native_window::present(&window, LAUNCHER_HEIGHT, "launcher-focus") {
-            eprintln!("唤起主入口失败：{error}");
+            diag!("唤起主入口失败：{error}");
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -93,7 +94,7 @@ fn show_settings(app: &AppHandle) {
     if let Some(window) = app.get_window("main") {
         #[cfg(target_os = "macos")]
         if let Err(error) = native_window::present(&window, 670.0, "show-settings") {
-            eprintln!("打开设置失败：{error}");
+            diag!("打开设置失败：{error}");
         }
         #[cfg(not(target_os = "macos"))]
         {
@@ -124,6 +125,7 @@ fn toggle_fullscreen(window: Window) -> Result<(), String> {
 
 #[tauri::command]
 fn hide_launcher(window: Window) -> Result<(), String> {
+    diag!("收起面板：主页面请求（Esc 等）");
     shortcuts::stop_recording();
     plugins::hide_active(window.app_handle());
     window
@@ -504,6 +506,7 @@ pub fn run() {
             database.execute("CREATE TABLE IF NOT EXISTS settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)", []).map_err(|error| tauri::Error::Anyhow(anyhow::anyhow!(error)))?;
             app.manage(AppState { database: Mutex::new(database) });
             // 先恢复唤起与全屏，再加载插件，插件命令的快捷键不会抢占这两项。
+            diag!("轻匣启动：版本 {}，进程 {}", app.package_info().version, std::process::id());
             shortcuts::initialize(app.handle()).map_err(anyhow::Error::msg)?;
             clipboard::initialize(app.handle()).map_err(anyhow::Error::msg)?;
             plugins::initialize(app.handle()).map_err(anyhow::Error::msg)?;
@@ -513,8 +516,8 @@ pub fn run() {
             let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
             TrayIconBuilder::new().title("匣").tooltip("轻匣").menu(&menu).on_menu_event(|app, event| {
                 match event.id.as_ref() {
-                    "show" => show_launcher(app),
-                    "settings" => show_settings(app),
+                    "show" => { diag!("菜单栏：打开轻匣"); show_launcher(app) }
+                    "settings" => { diag!("菜单栏：设置与插件"); show_settings(app) }
                     "quit" => app.exit(0),
                     _ => {}
                 }
@@ -532,6 +535,7 @@ pub fn run() {
         .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
         .on_window_event(|window, event| {
             if let WindowEvent::Focused(false) = event {
+                diag!("窗口失焦事件：{}", window.label());
                 shortcuts::stop_recording();
                 #[cfg(target_os = "macos")]
                 let _ = native_window::hide_if_unfocused(window);

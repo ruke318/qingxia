@@ -320,6 +320,7 @@ fn choose_directory() -> Result<Option<PathBuf>, String> {
 pub async fn import_plugin(app: AppHandle, webview: Webview) -> Result<Vec<PluginInfo>, String> {
     require_main(&webview)?;
     let source = on_main(&app, |app| {
+        crate::diag!("收起面板：打开插件目录选择器");
         super::hide_active(app);
         if let Some(window) = app.get_window("main") { let _ = window.hide(); }
         let selected = choose_directory();

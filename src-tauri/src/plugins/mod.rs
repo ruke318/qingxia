@@ -315,6 +315,7 @@ pub async fn plugin_call(app: AppHandle, webview: Webview, token: String, method
         }
         "view.back" => { crate::show_launcher(&app); }
         "view.hide" => {
+            crate::diag!("收起面板：插件请求 view.hide");
             hide_active(&app);
             webview.window().hide().map_err(|error| error.to_string())?;
             #[cfg(target_os = "macos")]
