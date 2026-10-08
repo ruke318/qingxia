@@ -48,4 +48,14 @@ export interface PluginResult {
   icon: string | null;
 }
 
-export type SearchResult = FileResult | PluginResult;
+/** 宿主内置功能（如截图），不经插件加载。 */
+export interface ActionResult {
+  name: string;
+  /** 功能标识，如 `screenshot`。 */
+  path: string;
+  parent: string;
+  kind: "action";
+  icon: null;
+}
+
+export type SearchResult = FileResult | PluginResult | ActionResult;

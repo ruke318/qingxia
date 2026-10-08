@@ -34,7 +34,7 @@ tauri-nspanel = { git = "https://github.com/ahkohd/tauri-nspanel", rev = "d2ab66
 objc2 = "0.6.4"
 block2 = "0.6.2"
 objc2-app-kit = { version = "0.3.2", features = ["NSScreen", "NSEvent", "NSWindow", "NSApplication", "NSWorkspace", "NSRunningApplication"] }
-objc2-foundation = { version = "0.3.2", features = ["NSGeometry"] }
+objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSProcessInfo"] }
 
 # 插件 iframe 的 IPC 加固：只接受主 frame 的脚本消息，说明见 patches/wry/轻匣补丁说明.md。
 [patch.crates-io]

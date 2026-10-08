@@ -22,8 +22,12 @@ use tauri_plugin_global_shortcut::{GlobalShortcutExt, Modifiers, Shortcut, Short
 pub const LAUNCHER: &str = "launcher";
 /// 插件全屏，只在面板内由原生按键监听处理，不注册为全局快捷键。
 pub const FULLSCREEN: &str = "fullscreen";
+/// 截图，注册为系统全局快捷键；可以清除。
+pub const SCREENSHOT: &str = "screenshot";
 const DEFAULT_LAUNCHER: &str = "Alt+Space";
 const DEFAULT_FULLSCREEN: &str = "Control+Super+F";
+/// 截图快捷键只在首次初始化时写入，之后用户修改或清除都不会被重置。
+const INITIAL_SCREENSHOT: &str = "Alt+Shift+A";
 
 /// 设置页正在录制快捷键：全局快捷键只回报组合、不执行动作，面板内也不截获全屏与编辑快捷键。
 static RECORDING: AtomicBool = AtomicBool::new(false);
@@ -107,10 +111,16 @@ fn find_holder(active: &BTreeMap<String, Shortcut>, shortcut: &Shortcut, except:
     active.iter().find(|(id, held)| id.as_str() != except && *held == shortcut).map(|(id, _)| id.clone())
 }
 
+/// 宿主内置项（唤起、全屏、截图），其余为插件命令。
+fn is_builtin(id: &str) -> bool {
+    matches!(id, LAUNCHER | FULLSCREEN | SCREENSHOT)
+}
+
 fn setting_key(id: &str) -> String {
     match id {
         LAUNCHER => "launcher_shortcut".into(),
         FULLSCREEN => "fullscreen_shortcut".into(),
+        SCREENSHOT => "screenshot_shortcut".into(),
         command => format!("plugin_shortcut:{command}"),
     }
 }
@@ -166,6 +176,7 @@ fn label(app: &AppHandle, id: &str) -> String {
     match id {
         LAUNCHER => "唤起轻匣".into(),
         FULLSCREEN => "插件全屏".into(),
+        SCREENSHOT => "截图".into(),
         command => crate::plugins::command_label(app, command).unwrap_or_else(|| command.to_string()),
     }
 }
@@ -203,6 +214,8 @@ fn register_global(app: &AppHandle, id: &str, shortcut: Shortcut) -> Result<(), 
             }
             if owner == LAUNCHER {
                 crate::show_launcher(app);
+            } else if owner == SCREENSHOT {
+                if let Err(error) = crate::capture::start_screenshot(app) { crate::diag!("截图未开始：{error}"); }
             } else {
                 let _ = crate::plugins::open_plugin(app.clone(), owner.clone());
             }
@@ -322,8 +335,26 @@ pub fn restore_locked(app: &AppHandle, id: &str) -> Result<(), String> {
 /// 启动时恢复唤起与全屏快捷键，须在加载插件之前调用。
 pub fn initialize(app: &AppHandle) -> Result<(), String> {
     let _update = lock_updates(app)?;
+    seed_screenshot(app)?;
     restore_locked(app, LAUNCHER)?;
-    restore_locked(app, FULLSCREEN)
+    restore_locked(app, FULLSCREEN)?;
+    restore_locked(app, SCREENSHOT)
+}
+
+/// 首次初始化时写入截图快捷键，以后不再写入（同剪贴板 ⌥⇧V 的做法）。
+fn seed_screenshot(app: &AppHandle) -> Result<(), String> {
+    let app_state = app.state::<crate::AppState>();
+    let mut database = app_state.database.lock().map_err(|_| "设置数据库不可用")?;
+    let transaction = database.transaction().map_err(|_| "初始化截图快捷键失败")?;
+    let first = transaction
+        .execute("INSERT OR IGNORE INTO settings(key, value) VALUES('screenshot:initialized', 'true')", [])
+        .map_err(|_| "初始化截图快捷键失败")?;
+    if first > 0 {
+        transaction
+            .execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?1, ?2)", params![setting_key(SCREENSHOT), INITIAL_SCREENSHOT])
+            .map_err(|_| "初始化截图快捷键失败")?;
+    }
+    transaction.commit().map_err(|_| "初始化截图快捷键失败".into())
 }
 
 /// 插件重载前撤销全部插件命令的快捷键并清空其错误；中途失败时恢复已撤销的项。调用方须持有更新锁。
@@ -331,7 +362,7 @@ pub fn release_commands_locked(app: &AppHandle) -> Result<(), String> {
     let shortcuts = state(app);
     let commands: Vec<(String, Shortcut)> = lock(&shortcuts.active)?
         .iter()
-        .filter(|(id, _)| default_value(id).is_none())
+        .filter(|(id, _)| !is_builtin(id))
         .map(|(id, shortcut)| (id.clone(), *shortcut))
         .collect();
     let mut released: Vec<(String, Shortcut)> = Vec::new();
@@ -345,7 +376,7 @@ pub fn release_commands_locked(app: &AppHandle) -> Result<(), String> {
         lock(&shortcuts.active)?.remove(&id);
         released.push((id, shortcut));
     }
-    lock(&shortcuts.errors)?.retain(|id, _| default_value(id).is_some());
+    lock(&shortcuts.errors)?.retain(|id, _| is_builtin(id));
     Ok(())
 }
 
@@ -371,6 +402,7 @@ fn rows(app: &AppHandle) -> Result<Vec<ShortcutRow>, String> {
     let mut rows = vec![
         row(app, LAUNCHER, "轻匣", "唤起轻匣", None, true)?,
         row(app, FULLSCREEN, "轻匣", "插件全屏", None, true)?,
+        row(app, SCREENSHOT, "轻匣", "截图", Some(INITIAL_SCREENSHOT.into()), true)?,
     ];
     for command in crate::plugins::management::installed_commands(app)? {
         rows.push(row(app, &command.id, &command.plugin_name, &command.title, command.suggested, command.enabled)?);
@@ -394,7 +426,7 @@ pub fn list_shortcuts(app: AppHandle, webview: Webview) -> Result<Vec<ShortcutRo
 #[tauri::command]
 pub fn save_shortcut_binding(app: AppHandle, webview: Webview, id: String, shortcut: Option<String>) -> Result<Vec<ShortcutRow>, String> {
     require_main(&webview)?;
-    if default_value(&id).is_none() && crate::plugins::command_label(&app, &id).is_none() {
+    if !is_builtin(&id) && crate::plugins::command_label(&app, &id).is_none() {
         return Err("插件未启用或命令不存在".into());
     }
     save(&app, &id, shortcut.as_deref())?;
@@ -443,6 +475,15 @@ mod tests {
         assert!(parse("F").is_err());
         assert!(parse("Super+").is_err());
         assert!(parse("不是快捷键").is_err());
+    }
+
+    #[test]
+    fn 内置项与插件命令的区分() {
+        assert!(is_builtin(LAUNCHER) && is_builtin(FULLSCREEN) && is_builtin(SCREENSHOT));
+        assert!(!is_builtin("clipboard-history:open"));
+        assert_eq!(default_value(SCREENSHOT), None, "截图快捷键可以清除，没有不可清除的默认值");
+        assert_eq!(setting_key(SCREENSHOT), "screenshot_shortcut");
+        assert_eq!(format(&parse(INITIAL_SCREENSHOT).unwrap()), "Alt+Shift+A");
     }
 
     #[test]

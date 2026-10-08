@@ -1,5 +1,6 @@
 #[cfg(target_os = "macos")]
 mod application_icon;
+mod capture;
 mod contracts;
 mod diag;
 #[cfg(target_os = "macos")]
@@ -125,14 +126,19 @@ fn toggle_fullscreen(window: Window) -> Result<(), String> {
 
 #[tauri::command]
 fn hide_launcher(window: Window) -> Result<(), String> {
-    diag!("收起面板：主页面请求（Esc 等）");
+    hide_panel(&window, "主页面请求（Esc 等）")
+}
+
+/// 收起主面板并交还焦点给之前的前台应用。
+fn hide_panel(window: &Window, reason: &str) -> Result<(), String> {
+    diag!("收起面板：{reason}");
     shortcuts::stop_recording();
     plugins::hide_active(window.app_handle());
     window
         .hide()
         .map_err(|error| format!("隐藏主入口失败：{error}"))?;
     #[cfg(target_os = "macos")]
-    native_window::hide_app(&window)?;
+    native_window::hide_app(window)?;
     Ok(())
 }
 
@@ -496,6 +502,7 @@ pub fn run() {
         })
         .manage(plugins::PluginState::default())
         .manage(shortcuts::ShortcutState::default())
+        .manage(capture::CaptureState::default())
         .register_uri_scheme_protocol("qingbox-plugin", |context, request| {
             plugins::resource(context.app_handle(), context.webview_label(), request.uri().path())
         })
@@ -532,7 +539,7 @@ pub fn run() {
             show_launcher(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
+        .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, capture::start_screenshot_command, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
         .on_window_event(|window, event| {
             if let WindowEvent::Focused(false) = event {
                 diag!("窗口失焦事件：{}", window.label());

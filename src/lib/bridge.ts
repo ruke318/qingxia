@@ -47,6 +47,12 @@ export async function onShortcutsChanged(callback: () => void): Promise<() => vo
   return isDesktop ? listen("shortcuts-changed", callback) : () => {};
 }
 
+/** 宿主内置截图：收起主面板后开始截图；系统版本不满足时拒绝并给出原因。 */
+export async function startScreenshot(): Promise<void> {
+  if (!isDesktop) throw new Error("请在桌面应用中截图");
+  await invoke("start_screenshot_command");
+}
+
 export async function toggleFullscreen(): Promise<void> {
   if (isDesktop) await invoke("toggle_fullscreen");
 }

@@ -1,8 +1,8 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, toggleFullscreen, onFullscreenToggle, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
-import type { PluginCommand, PluginResult, SearchResult } from "./lib/types";
+import { hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, toggleFullscreen, startScreenshot, onFullscreenToggle, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
+import type { ActionResult, PluginCommand, PluginResult, SearchResult } from "./lib/types";
 import { FileIcon } from "./components/FileIcon";
 import { ApplicationIcon } from "./components/ApplicationIcon";
 import { PluginIcon } from "./components/PluginIcon";
@@ -10,6 +10,11 @@ import { PluginManager } from "./features/plugins/PluginManager";
 import { PluginFrame } from "./features/plugins/PluginFrame";
 import { ShortcutSettings } from "./features/shortcuts/ShortcutSettings";
 import { fileType } from "./lib/file-types";
+
+/** 宿主内置功能，与插件命令一起参与搜索。 */
+const BUILTIN_ACTIONS = [
+  { id: "screenshot", title: "截图", keywords: ["截图", "截屏", "screenshot", "jietu", "capture"] },
+];
 
 type SettingsTab = "shortcuts" | "plugins";
 
@@ -35,10 +40,10 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
 }
 
 function ResultRow({ item, index, active, onClick }: { item: SearchResult; index: number; active: boolean; onClick: () => void }) {
-  const type = item.kind === "plugin" ? { icon: "file" as const, label: "插件" } : fileType(item);
+  const type = item.kind === "plugin" ? { icon: "file" as const, label: "插件" } : item.kind === "action" ? { icon: "file" as const, label: "功能" } : fileType(item);
   return (
     <button id={`result-${index}`} role="option" aria-selected={active} tabIndex={-1} className={`result-row${active ? " active" : ""}`} onClick={onClick}>
-      {item.kind === "plugin" ? <PluginIcon icon={item.icon} /> : item.kind === "application" ? <ApplicationIcon path={item.path} /> : <FileIcon kind={type.icon} />}
+      {item.kind === "plugin" || item.kind === "action" ? <PluginIcon icon={item.icon} /> : item.kind === "application" ? <ApplicationIcon path={item.path} /> : <FileIcon kind={type.icon} />}
       <span className="result-copy"><strong title={item.name}>{item.name}</strong><small title={item.parent}>{item.parent}</small></span>
       <span className="result-kind" title={type.label}>{type.label}</span>
     </button>
@@ -117,8 +122,10 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
       if (cancelled || id !== requestRef.current) return;
       const term = query.trim().toLowerCase();
       const pathQuery = term.startsWith("/") || term.startsWith("~");
-      const pluginItems: PluginResult[] = pathQuery ? [] : commands.filter((command) => [command.title, command.pluginName, ...command.keywords].some((text) => text.toLowerCase().includes(term)))
-        .slice(0, 5).map((command) => ({ name: command.title, path: command.id, parent: command.pluginName, kind: "plugin", icon: command.icon }));
+      const actionItems: ActionResult[] = pathQuery ? [] : BUILTIN_ACTIONS.filter((action) => [action.title, ...action.keywords].some((text) => text.toLowerCase().includes(term)))
+        .map((action) => ({ name: action.title, path: action.id, parent: "轻匣", kind: "action", icon: null }));
+      const pluginItems: (ActionResult | PluginResult)[] = pathQuery ? [] : [...actionItems, ...commands.filter((command) => [command.title, command.pluginName, ...command.keywords].some((text) => text.toLowerCase().includes(term)))
+        .slice(0, 5).map((command): PluginResult => ({ name: command.title, path: command.id, parent: command.pluginName, kind: "plugin", icon: command.icon }))];
       setItems((current) => refreshing && current.length ? current : pluginItems);
       setNotice(null);
       if (!refreshing) setActiveIndex(0);
@@ -170,6 +177,11 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
     const target = item ?? items[activeIndex];
     if (!target) return;
     try {
+      if (target.kind === "action") {
+        // 宿主收起主面板后开始截图
+        if (target.path === "screenshot") await startScreenshot();
+        return;
+      }
       if (target.kind === "plugin") {
         // 插件先于文件结果出现，回车后立即停止搜索视图的异步更新。
         onPlugin();
