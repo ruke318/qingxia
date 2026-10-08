@@ -107,6 +107,8 @@ pub fn open(app: &AppHandle, png: Vec<u8>, screen_index: usize, rect: (f64, f64,
             | NSWindowCollectionBehavior::IgnoresCycle,
     );
     native.setFrame_display(NSRect::new(NSPoint::new(x, y), NSSize::new(width, height)), false);
+    // 截图结束时应用可能已被隐藏，先恢复显示（不激活）贴图才看得见
+    objc2_app_kit::NSApplication::sharedApplication(main_thread).unhideWithoutActivation();
     native.makeKeyAndOrderFront(None);
     native.orderFrontRegardless();
     if let Some(webview) = app.get_webview(&label) { let _ = webview.set_focus(); }

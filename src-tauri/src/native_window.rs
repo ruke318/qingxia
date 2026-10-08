@@ -408,6 +408,13 @@ fn hide_now(target: &Window, native: &NSPanel, main_thread: MainThreadMarker, re
     }
 }
 
+/// 截图结束后交还焦点：应用处于激活状态且没有贴图时隐藏应用。须在主线程调用。
+pub fn release_focus() {
+    if let Some(main_thread) = MainThreadMarker::new() {
+        if crate::capture::pin::count() == 0 { hide_application(main_thread) }
+    }
+}
+
 /// 面板已由调用方收起，再隐藏应用以交还焦点。
 pub fn hide_app(window: &Window) -> Result<(), String> {
     on_main_thread(window, |_, _, main_thread| {

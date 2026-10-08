@@ -1,7 +1,7 @@
 //! 导出截图：覆盖窗按物理像素把选区合成为 PNG，宿主复制到剪贴板或保存为文件。
 //!
 //! 成功后结束会话并关闭覆盖窗；失败时会话回到标注阶段，保留选区与编辑内容，覆盖窗显示原因并可重试。
-use std::{fs::OpenOptions, io::Write, path::PathBuf};
+use std::path::PathBuf;
 
 use tauri::{ipc::{InvokeBody, Request}, AppHandle, Manager, Webview};
 
@@ -51,7 +51,15 @@ pub fn capture_export(app: AppHandle, webview: Webview, request: Request<'_>) ->
     }
     let result = match action {
         Action::Copy => copy(png).map(|_| None),
-        Action::Save => save(png).map(|path| Some(path.to_string_lossy().into_owned())),
+        Action::Save => match save(&app, webview.label(), png)? {
+            Some(path) => Ok(Some(path.to_string_lossy().into_owned())),
+            None => {
+                // 取消保存：回到标注阶段，覆盖窗已恢复，可继续编辑或改用复制
+                state.advance(session, Event::Fail)?;
+                crate::diag!("截图：会话 {session} 取消保存");
+                return Ok(None);
+            }
+        },
         Action::Pin => unreachable!("贴图已在上方处理"),
     };
     match &result {
@@ -97,30 +105,74 @@ fn pin_rect(text: &str) -> Result<(f64, f64, f64, f64), String> {
     }
 }
 
-/// 文件名：`轻匣截图 2026-10-08 21.03.15.123.png`；重名时追加序号，不覆盖已有文件。
+/// 默认文件名：`轻匣截图 2026-10-08 21.03.15.123.png`；`attempt` 大于 0 时追加序号。
 fn file_name(stamp: &str, attempt: u32) -> String {
     if attempt == 0 { format!("轻匣截图 {stamp}.png") } else { format!("轻匣截图 {stamp} {}.png", attempt + 1) }
 }
 
-fn save(png: &[u8]) -> Result<PathBuf, String> {
-    let directory = dirs::picture_dir().ok_or("找不到“图片”目录")?.join("轻匣截图");
-    std::fs::create_dir_all(&directory).map_err(|error| format!("创建保存目录失败：{error}"))?;
-    let stamp = crate::diag::timestamp().replace(':', ".");
-    for attempt in 0..100 {
-        let path = directory.join(file_name(&stamp, attempt));
-        match OpenOptions::new().write(true).create_new(true).open(&path) {
-            Ok(mut file) => {
-                if let Err(error) = file.write_all(png).and_then(|_| file.sync_all()) {
-                    let _ = std::fs::remove_file(&path);
-                    return Err(format!("保存截图失败：{error}"));
-                }
-                return Ok(path);
-            }
-            Err(error) if error.kind() == std::io::ErrorKind::AlreadyExists => continue,
-            Err(error) => return Err(format!("保存截图失败：{error}")),
-        }
+/// 上次保存截图的目录，保存在设置表中。
+const SAVE_DIRECTORY_KEY: &str = "capture:save_directory";
+
+fn last_directory(app: &AppHandle) -> Option<PathBuf> {
+    let state = app.state::<crate::AppState>();
+    let database = state.database.lock().ok()?;
+    let path: String = database.query_row("SELECT value FROM settings WHERE key = ?1", [SAVE_DIRECTORY_KEY], |row| row.get(0)).ok()?;
+    let path = PathBuf::from(path);
+    path.is_dir().then_some(path)
+}
+
+fn remember_directory(app: &AppHandle, directory: &std::path::Path) {
+    let state = app.state::<crate::AppState>();
+    let Ok(database) = state.database.lock() else { return };
+    let _ = database.execute(
+        "INSERT INTO settings(key, value) VALUES(?1, ?2) ON CONFLICT(key) DO UPDATE SET value = excluded.value",
+        [SAVE_DIRECTORY_KEY, &directory.to_string_lossy()],
+    );
+}
+
+/// 弹出系统保存对话框，由用户选择位置与文件名；取消时返回 `None`。
+/// 对话框弹出期间隐藏覆盖窗，否则会被屏保层级的覆盖窗挡住；取消后恢复覆盖窗继续编辑。
+#[cfg(target_os = "macos")]
+fn save(app: &AppHandle, overlay_label: &str, png: &[u8]) -> Result<Option<PathBuf>, String> {
+    use objc2::MainThreadMarker;
+    use objc2_app_kit::{NSApplication, NSModalResponseOK, NSSavePanel};
+    use objc2_foundation::{NSString, NSURL};
+
+    let marker = MainThreadMarker::new().ok_or("保存对话框必须在主线程打开")?;
+    overlay::set_visible(app, false, overlay_label);
+    // 非激活面板收不到对话框的键盘输入，需激活应用
+    #[allow(deprecated)]
+    NSApplication::sharedApplication(marker).activateIgnoringOtherApps(true);
+    let panel = NSSavePanel::savePanel(marker);
+    panel.setTitle(Some(&NSString::from_str("保存截图")));
+    panel.setCanCreateDirectories(true);
+    panel.setExtensionHidden(false);
+    let directory = last_directory(app).or_else(dirs::picture_dir);
+    if let Some(directory) = directory {
+        panel.setDirectoryURL(Some(&NSURL::fileURLWithPath_isDirectory(&NSString::from_str(&directory.to_string_lossy()), true)));
     }
-    Err("同名截图过多，无法保存".into())
+    let stamp = crate::diag::timestamp().replace(':', ".");
+    panel.setNameFieldStringValue(&NSString::from_str(&file_name(&stamp, 0)));
+    let chosen = (panel.runModal() == NSModalResponseOK)
+        .then(|| panel.URL().and_then(|url| url.path()).map(|path| PathBuf::from(path.to_string())))
+        .flatten();
+    let Some(mut path) = chosen else {
+        overlay::set_visible(app, true, overlay_label);
+        return Ok(None);
+    };
+    if path.extension().is_none_or(|extension| !extension.eq_ignore_ascii_case("png")) { path.set_extension("png"); }
+    // 同名文件由系统对话框确认是否替换
+    if let Err(error) = std::fs::write(&path, png) {
+        overlay::set_visible(app, true, overlay_label);
+        return Err(format!("保存截图失败：{error}"));
+    }
+    if let Some(parent) = path.parent() { remember_directory(app, parent); }
+    Ok(Some(path))
+}
+
+#[cfg(not(target_os = "macos"))]
+fn save(_app: &AppHandle, _overlay_label: &str, _png: &[u8]) -> Result<Option<PathBuf>, String> {
+    Err("当前平台不支持保存截图".into())
 }
 
 #[cfg(test)]

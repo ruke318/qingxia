@@ -426,7 +426,7 @@ export function CaptureOverlay() {
               <button type="button" aria-label="取消" title="取消（Esc）" disabled={busy !== null} onClick={() => { if (isTauri() && context) void invoke("capture_cancel", { session: context.session }); }}>
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M5 5l10 10M15 5L5 15" /></svg>
               </button>
-              <button type="button" aria-label="保存" title="保存到“图片/轻匣截图”（⌘S）" disabled={busy !== null} onClick={() => void exportAs("save")}>
+              <button type="button" aria-label="保存" title="保存…（⌘S）" disabled={busy !== null} onClick={() => void exportAs("save")}>
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16h12" /></svg>
               </button>
               <button type="button" aria-label="贴图" title="钉在屏幕上" disabled={busy !== null} onClick={() => void exportAs("pin")}>

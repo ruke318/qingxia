@@ -135,6 +135,20 @@ pub fn destroy_window(app: &AppHandle, label: &str) {
     }
 }
 
+/// 暂时隐藏或恢复本会话的全部覆盖窗；恢复时 `key_label` 对应的覆盖窗取得键盘焦点。
+pub fn set_visible(app: &AppHandle, visible: bool, key_label: &str) {
+    #[cfg(target_os = "macos")]
+    for label in app.webview_windows().into_keys().filter(|label| label.starts_with(LABEL_PREFIX)) {
+        let Ok(panel) = tauri_nspanel::ManagerExt::get_webview_panel(app, &label) else { continue };
+        let native = panel.as_panel();
+        if !visible { native.orderOut(None) }
+        else if label == key_label { native.makeKeyAndOrderFront(None) }
+        else { native.orderFrontRegardless() }
+    }
+    #[cfg(not(target_os = "macos"))]
+    let _ = (app, visible, key_label);
+}
+
 /// 从覆盖窗标签解析屏幕序号。
 pub fn screen_of(label: &str) -> Option<usize> {
     label.strip_prefix(LABEL_PREFIX)?.split('-').nth(1)?.parse().ok()

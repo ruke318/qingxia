@@ -194,6 +194,9 @@ fn finish(app: &AppHandle, id: u64, event: Event, reason: &str) -> Result<(), St
     if !app.state::<CaptureState>().advance(id, event)? { return Ok(()) }
     overlay::close_all(app);
     screenshot::clear();
+    // 保存对话框会激活应用；结束后把焦点交还给原来的应用（有贴图时保留应用，避免贴图一起隐藏）
+    #[cfg(target_os = "macos")]
+    crate::native_window::release_focus();
     crate::diag!("截图：会话 {id} 结束（{reason}）");
     Ok(())
 }
