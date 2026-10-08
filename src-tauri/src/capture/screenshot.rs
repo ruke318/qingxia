@@ -38,10 +38,16 @@ impl Snapshot {
         use objc2::AllocAnyThread;
         use objc2_app_kit::{NSBitmapImageFileType, NSBitmapImageRep};
         use objc2_foundation::NSDictionary;
-        let representation = NSBitmapImageRep::initWithCGImage(NSBitmapImageRep::alloc(), &self.image.0);
-        let data = unsafe { representation.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new()) }
-            .ok_or("快照编码失败")?;
-        Ok(data.to_vec())
+        let started = std::time::Instant::now();
+        // 在后台线程编码，自动释放池回收 AppKit 临时对象
+        let result = objc2::rc::autoreleasepool(|_| {
+            let representation = NSBitmapImageRep::initWithCGImage(NSBitmapImageRep::alloc(), &self.image.0);
+            unsafe { representation.representationUsingType_properties(NSBitmapImageFileType::PNG, &NSDictionary::new()) }
+                .map(|data| data.to_vec())
+                .ok_or_else(|| "快照编码失败".to_string())
+        });
+        crate::diag!("截图：显示器 {} 快照编码 {} 毫秒", self.display, started.elapsed().as_millis());
+        result
     }
 
     #[cfg(not(target_os = "macos"))]
@@ -54,7 +60,13 @@ impl Snapshot {
 static STORE: Mutex<Option<(u64, HashMap<u32, Arc<Snapshot>>)>> = Mutex::new(None);
 
 pub fn store(session: u64, snapshots: Vec<Snapshot>) {
-    let map = snapshots.into_iter().map(|snapshot| (snapshot.display, Arc::new(snapshot))).collect();
+    let snapshots: Vec<Arc<Snapshot>> = snapshots.into_iter().map(Arc::new).collect();
+    // 截完立即在后台并行编码，与创建覆盖窗同时进行；页面请求时若未完成会等待同一份结果
+    for snapshot in &snapshots {
+        let snapshot = snapshot.clone();
+        std::thread::spawn(move || { let _ = snapshot.png(); });
+    }
+    let map = snapshots.into_iter().map(|snapshot| (snapshot.display, snapshot)).collect();
     if let Ok(mut store) = STORE.lock() { *store = Some((session, map)); }
 }
 

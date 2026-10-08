@@ -71,6 +71,8 @@ pub fn transition(phase: Phase, event: Event) -> Option<Phase> {
 struct Session {
     id: u64,
     phase: Phase,
+    /// 按下快捷键的时刻，用于记录各步骤耗时。
+    started: Option<std::time::Instant>,
 }
 
 pub struct CaptureState {
@@ -79,7 +81,7 @@ pub struct CaptureState {
 
 impl Default for CaptureState {
     fn default() -> Self {
-        Self { session: Mutex::new(Session { id: 0, phase: Phase::Idle }) }
+        Self { session: Mutex::new(Session { id: 0, phase: Phase::Idle, started: None }) }
     }
 }
 
@@ -90,6 +92,7 @@ impl CaptureState {
         let Some(phase) = transition(session.phase, Event::Start) else { return Ok(None) };
         session.id += 1;
         session.phase = phase;
+        session.started = Some(std::time::Instant::now());
         Ok(Some(session.id))
     }
 
@@ -202,6 +205,17 @@ pub fn cancel_active(app: &AppHandle) {
     if let Some(id) = id {
         if let Err(error) = finish(app, id, Event::Cancel, "唤起主面板") { crate::diag!("取消截图失败：{error}"); }
     }
+}
+
+/// 覆盖窗显示出冻结画面时上报，用于记录从按键到画面就绪的耗时。
+#[tauri::command]
+pub fn capture_ready(app: AppHandle, webview: Webview, session: u64) {
+    if overlay::session_of(webview.label()) != Some(session) { return }
+    let elapsed = app.state::<CaptureState>().session.lock().ok()
+        .filter(|current| current.id == session)
+        .and_then(|current| current.started)
+        .map(|started| started.elapsed().as_millis());
+    if let Some(elapsed) = elapsed { crate::diag!("截图：会话 {session} {} 画面就绪，距按键 {elapsed} 毫秒", webview.label()); }
 }
 
 /// 覆盖窗请求取消（Esc）。只接受本会话覆盖窗的调用。

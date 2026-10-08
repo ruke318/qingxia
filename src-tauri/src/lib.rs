@@ -514,8 +514,11 @@ pub fn run() {
             plugins::resource(context.app_handle(), context.webview_label(), request.uri().path())
         })
         // 截图快照只交给本会话的覆盖窗。
-        .register_uri_scheme_protocol("qingbox-capture", |context, request| {
-            capture::screenshot::serve(context.webview_label(), request.uri().path())
+        // 快照编码耗时，异步处理，不阻塞主线程
+        .register_asynchronous_uri_scheme_protocol("qingbox-capture", |context, request, responder| {
+            let label = context.webview_label().to_string();
+            let path = request.uri().path().to_string();
+            std::thread::spawn(move || responder.respond(capture::screenshot::serve(&label, &path)));
         })
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
@@ -550,7 +553,7 @@ pub fn run() {
             show_launcher(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, capture::start_screenshot_command, capture::capture_cancel, capture::export::capture_export, capture::pin::pin_close, capture::pin::pin_scale, capture::pin::pin_copy, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
+        .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, capture::start_screenshot_command, capture::capture_cancel, capture::capture_ready, capture::export::capture_export, capture::pin::pin_close, capture::pin::pin_scale, capture::pin::pin_copy, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
         .on_window_event(|window, event| {
             // 失焦收起只作用于主面板；截图覆盖窗自行管理焦点与关闭。
             if window.label() != "main" { return }

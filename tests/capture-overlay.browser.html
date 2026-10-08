@@ -119,10 +119,11 @@
       }],
       ["Esc 只取消当前会话，输入法组字时不取消", async () => {
         window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", isComposing: true, bubbles: true }));
-        assert(calls.length === 0, "输入法组字时不应取消截图");
+        const cancels = () => calls.filter((call) => call.command === "capture_cancel");
+        assert(cancels().length === 0, "输入法组字时不应取消截图");
         window.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
         await pause();
-        assert(calls.length === 1 && calls[0].command === "capture_cancel" && calls[0].args.session === 12, "应只取消本会话一次");
+        assert(cancels().length === 1 && cancels()[0].args.session === 12, "应只取消本会话一次");
       }],
       ["选区完成后显示工具栏，拖动期间隐藏", async () => {
         const toolbar = () => document.querySelector('[aria-label="截图操作"]');

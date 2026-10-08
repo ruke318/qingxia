@@ -379,7 +379,7 @@ export function CaptureOverlay() {
   const panelAbove = toolbar ? toolbar.top + TOOLBAR_HEIGHT + 46 > window.innerHeight : false;
   return (
     <>
-    {context?.image && <img className="capture-snapshot" src={context.image} alt="" draggable={false} />}
+    {context?.image && <img className="capture-snapshot" src={context.image} alt="" draggable={false} onLoad={() => { if (isTauri()) void invoke("capture_ready", { session: context.session }); }} />}
     <main className={`capture-overlay${visible ? " has-selection" : ""}`} aria-label="截图" onMouseDown={(event) => begin(event, "draw")}>
       <p className="capture-hint">{visible ? (tool ? "按住 ⇧ 吸附角度 · ⌘Z 撤销 · 回车复制" : "回车复制 · ⌘S 保存 · Esc 取消") : "拖动选择区域 · Esc 取消"}</p>
       {visible && (

@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-capture-ready"
+description = "Enables the capture_ready command without any pre-configured scope."
+commands.allow = ["capture_ready"]
+
+[[permission]]
+identifier = "deny-capture-ready"
+description = "Denies the capture_ready command without any pre-configured scope."
+commands.deny = ["capture_ready"]
