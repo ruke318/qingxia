@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, toggleFullscreen, startScreenshot, startRecording, onFullscreenToggle, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
+import { hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, reportLauncherReady, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, toggleFullscreen, startScreenshot, startRecording, onFullscreenToggle, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
 import type { ActionResult, PluginCommand, PluginResult, SearchResult } from "./lib/types";
 import { FileIcon } from "./components/FileIcon";
 import { ApplicationIcon } from "./components/ApplicationIcon";
@@ -101,6 +101,11 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
       });
       inputRef.current?.focus();
       inputRef.current?.select();
+      // 隐藏页面可能暂停动画帧；立即回报事件已处理，屏上状态由原生层复查。
+      const input = inputRef.current;
+      const frame = input?.getBoundingClientRect();
+      void reportLauncherReady(document.activeElement === input, document.visibilityState === "visible" && !!frame && frame.width > 0 && frame.height > 0)
+        .catch((error) => console.warn("记录主入口唤起状态失败", error));
     }).then((dispose) => {
       if (cancelled) dispose();
       else unlisten = dispose;

@@ -6,7 +6,7 @@ use objc2_app_kit::{
     NSBox, NSBoxType, NSColor, NSEvent, NSEventMask, NSEventModifierFlags, NSGlassEffectView, NSGlassEffectViewStyle, NSPanel, NSScreen,
     NSScreenSaverWindowLevel, NSTitlePosition, NSView,
     NSVisualEffectBlendingMode, NSVisualEffectState, NSVisualEffectView,
-    NSWindowCollectionBehavior, NSWindowOrderingMode, NSWindowStyleMask,
+    NSWindowCollectionBehavior, NSWindowOcclusionState, NSWindowOrderingMode, NSWindowStyleMask,
 };
 use objc2_foundation::{NSNotification, NSNotificationCenter, NSObjectProtocol, NSOperationQueue, NSPoint, NSRect, NSSize};
 use tauri::{Emitter, Manager, WebviewWindow, Window};
@@ -203,6 +203,7 @@ fn settle_later(window: &Window) {
     std::thread::spawn(move || {
         std::thread::sleep(SETTLE);
         let _ = on_main_thread(&target, |target, native, main_thread| {
+            log_presented(native, main_thread, "唤起过渡期复查", None);
             if !native.isVisible() || native.isKeyWindow() || settling() { return }
             // 截图覆盖窗持有焦点时不抢回
             if target.app_handle().state::<crate::capture::CaptureState>().active() || target.app_handle().state::<crate::capture::record::RecordState>().active() { return }
@@ -355,6 +356,7 @@ pub fn present(window: &Window, height: f64, event: &'static str, notice: Option
     on_main_thread(window, move |target, native, main_thread| {
         let mouse = NSEvent::mouseLocation();
         let Some(screen) = mouse_screen(main_thread) else {
+            crate::diag!("显示面板（{event}）失败：没有可用屏幕");
             return;
         };
         // 全程使用 AppKit 的逻辑坐标，避免混合缩放显示器间的坐标换算错误。
@@ -370,7 +372,9 @@ pub fn present(window: &Window, height: f64, event: &'static str, notice: Option
             centered_x(screen.frame(), actual.size.width),
             actual.origin.y,
         ));
-        let _ = target.emit(event, notice);
+        if let Err(error) = target.emit(event, notice) {
+            crate::diag!("发送主页面事件 {event} 失败：{error}");
+        }
         settle_later(target);
         log_presented(native, main_thread, event, Some((mouse.x, mouse.y)));
     })
@@ -508,9 +512,11 @@ fn log_presented(native: &NSPanel, main_thread: MainThreadMarker, event: &str, m
     }).unwrap_or_else(|| "无".into());
     let mouse = mouse.map(|(x, y)| format!("，鼠标 ({x:.0}, {y:.0})")).unwrap_or_default();
     crate::diag!(
-        "显示面板（{event}）：可见 {}，键盘焦点 {}，应用激活 {}，屏幕 {screen}，窗口 ({:.0}, {:.0}) {:.0}×{:.0}{mouse}",
+        "显示面板（{event}）：可见 {}，键盘焦点 {}，应用激活 {}，屏幕 {screen}，窗口 ({:.0}, {:.0}) {:.0}×{:.0}{mouse}，应用隐藏 {}，最小化 {}，当前桌面 {}，屏上可见 {}",
         native.isVisible(), native.isKeyWindow(), NSApplication::sharedApplication(main_thread).isActive(),
         frame.origin.x, frame.origin.y, frame.size.width, frame.size.height,
+        NSApplication::sharedApplication(main_thread).isHidden(), native.isMiniaturized(), native.isOnActiveSpace(),
+        native.occlusionState().contains(NSWindowOcclusionState::Visible),
     );
 }
 

@@ -64,7 +64,11 @@ fn show_launcher_with(app: &AppHandle, notice: Option<&str>) {
     // 截图中唤起主面板：先结束截图，覆盖窗不与主面板叠在一起。
     if app.state::<capture::CaptureState>().active() { capture::cancel_active(app); }
     plugins::hide_active(app);
-    if let Some(view) = app.get_webview("main") { let _ = view.set_focus(); }
+    if let Some(view) = app.get_webview("main") {
+        if let Err(error) = view.set_focus() { diag!("聚焦主入口页面失败：{error}"); }
+    } else {
+        diag!("唤起主入口失败：主页面不存在");
+    }
     if let Some(window) = app.get_window("main") {
         #[cfg(target_os = "macos")]
         if let Err(error) = native_window::present(&window, LAUNCHER_HEIGHT, "launcher-focus", notice.map(str::to_string)) {
@@ -77,6 +81,8 @@ fn show_launcher_with(app: &AppHandle, notice: Option<&str>) {
             let _ = window.set_focus();
             let _ = window.emit("launcher-focus", notice);
         }
+    } else {
+        diag!("唤起主入口失败：主窗口不存在");
     }
 }
 
@@ -129,6 +135,13 @@ fn toggle_fullscreen(window: Window) -> Result<(), String> {
     return native_window::toggle_fullscreen(&window).map_err(|error| format!("切换全屏失败：{error}"));
     #[cfg(not(target_os = "macos"))]
     { let _ = window; Ok(()) }
+}
+
+#[tauri::command]
+fn launcher_ready(webview: tauri::Webview, focused: bool, visible: bool) -> Result<(), String> {
+    if webview.label() != "main" { return Err("只有主页面可以回报唤起状态".into()); }
+    diag!("主页面响应唤起：输入框焦点 {focused}，页面内可见 {visible}");
+    Ok(())
 }
 
 #[tauri::command]
@@ -561,7 +574,7 @@ pub fn run() {
             show_launcher(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, capture::record::start_recording_command, capture::record::record_start, capture::record::record_cancel, capture::record::record_status, capture::record::record_stop, capture::record::record_card_action, capture::start_screenshot_command, capture::capture_cancel, capture::capture_ready, capture::long::capture_long_start, capture::long::capture_long_finish, capture::long::capture_long_export, capture::long::capture_long_cancel, capture::export::capture_export, capture::pin::pin_close, capture::pin::pin_scale, capture::pin::pin_copy, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
+        .invoke_handler(tauri::generate_handler![launcher_ready, shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, capture::record::start_recording_command, capture::record::record_start, capture::record::record_cancel, capture::record::record_status, capture::record::record_stop, capture::record::record_card_action, capture::start_screenshot_command, capture::capture_cancel, capture::capture_ready, capture::long::capture_long_start, capture::long::capture_long_finish, capture::long::capture_long_export, capture::long::capture_long_cancel, capture::export::capture_export, capture::pin::pin_close, capture::pin::pin_scale, capture::pin::pin_copy, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
         .on_window_event(|window, event| {
             // 失焦收起只作用于主面板；截图覆盖窗自行管理焦点与关闭。
             if window.label().starts_with("record-") {
@@ -584,6 +597,12 @@ pub fn run() {
         .build(tauri::generate_context!())
         .expect("轻匣启动失败")
         .run(|app, event| {
+            #[cfg(target_os = "macos")]
+            if let tauri::RunEvent::Reopen { .. } = event {
+                // 常驻应用再次从访达或系统搜索打开时，也必须恢复主入口。
+                diag!("系统请求重新打开轻匣");
+                show_launcher(app);
+            }
             if let tauri::RunEvent::ExitRequested { api, .. } = event {
                 if capture::record::prepare_exit(app) { api.prevent_exit(); }
             }

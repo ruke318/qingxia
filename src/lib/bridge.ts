@@ -93,6 +93,11 @@ export async function onLauncherFocus(callback: (notice: string | null) => void)
   return listen<string | null>("launcher-focus", (event) => callback(event.payload ?? null));
 }
 
+/** 只回报输入框状态，帮助区分原生窗口显示成功与页面真正响应；不传搜索内容。 */
+export async function reportLauncherReady(focused: boolean, visible: boolean): Promise<void> {
+  if (isDesktop) await invoke("launcher_ready", { focused, visible });
+}
+
 export async function onShowSettings(callback: () => void): Promise<() => void> {
   if (!isDesktop) return () => {};
   return listen("show-settings", callback);

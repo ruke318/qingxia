@@ -1,0 +1,88 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>主入口唤起回归检查</title></head>
+<body>
+  <div id="root"></div>
+  <script type="module">
+    const callbacks = new Map();
+    const listeners = new Map();
+    const reports = [];
+    let nextId = 0;
+    globalThis.isTauri = true;
+    window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: (_, id) => listeners.delete(id) };
+    window.__TAURI_INTERNALS__ = {
+      transformCallback(callback) { callbacks.set(++nextId, callback); return nextId; },
+      invoke(command, args) {
+        if (command === "plugin:event|listen") {
+          listeners.set(++nextId, { event: args.event, callback: callbacks.get(args.handler) });
+          return Promise.resolve(nextId);
+        }
+        if (command === "plugin:event|unlisten") { listeners.delete(args.eventId); return Promise.resolve(); }
+        if (command === "begin_search_session") return Promise.resolve(1);
+        if (["list_plugin_commands", "list_shortcuts"].includes(command)) return Promise.resolve([]);
+        if (command === "search_files") return Promise.resolve({ requestId: args.requestId, items: [], notice: null });
+        if (command === "launcher_ready") { reports.push(args); return Promise.resolve(); }
+        if (["resize_launcher", "set_shortcut_recording", "leave_plugin"].includes(command)) return Promise.resolve();
+        throw new Error(`测试收到意外命令：${command}`);
+      },
+    };
+    function emit(event) {
+      for (const [id, listener] of [...listeners]) {
+        if (listener.event === event) listener.callback({ event, id, payload: null });
+      }
+    }
+    function assert(value, message) { if (!value) throw new Error(message); }
+    async function until(check, message) {
+      const deadline = Date.now() + 3000;
+      while (!check()) {
+        if (Date.now() > deadline) throw new Error(message);
+        await new Promise((resolve) => setTimeout(resolve, 10));
+      }
+    }
+    localStorage.setItem("qingbox:last-search-query", "测试搜索内容");
+    await import("/src/main.tsx");
+    const field = () => document.querySelector('[role="combobox"]');
+    await until(() => field() && [...listeners.values()].filter((item) => item.event === "launcher-focus").length === 2, "主入口监听未就绪");
+    const scenarios = [
+      ["动画帧暂停时仍能确认页面已处理唤起事件", async () => {
+        const requestFrame = window.requestAnimationFrame;
+        window.requestAnimationFrame = () => 0;
+        try {
+          const before = reports.length;
+          emit("launcher-focus");
+          await until(() => reports.length > before, "动画帧暂停导致页面回报丢失");
+          assert(reports.at(-1).focused, "事件处理后没有报告输入框焦点");
+        } finally { window.requestAnimationFrame = requestFrame; }
+      }],
+      ["反复唤起后报告真实输入框状态，保留并选中原搜索词", async () => {
+        for (let index = 0; index < 3; index++) {
+          field().blur();
+          const before = reports.length;
+          emit("launcher-focus");
+          await until(() => reports.length > before, "主页面未回报唤起结果");
+          assert(document.activeElement === field(), "唤起后焦点没有回到输入框");
+          assert(field().value === "测试搜索内容" && field().selectionStart === 0 && field().selectionEnd === 6, "原搜索词没有保留并选中");
+          assert(JSON.stringify(reports.at(-1)) === JSON.stringify({ focused: true, visible: true }), "上报状态不正确或包含了搜索内容");
+        }
+      }],
+      ["从设置页唤起时回到主入口并报告就绪", async () => {
+        emit("show-settings");
+        await until(() => document.querySelector('[aria-label="轻匣设置"]'), "未打开设置页");
+        const before = reports.length;
+        emit("launcher-focus");
+        await until(() => reports.length > before && !document.querySelector('[aria-label="轻匣设置"]'), "没有回到主入口并报告就绪");
+        assert(document.activeElement === field() && reports.at(-1).focused && reports.at(-1).visible, "主入口未恢复输入焦点");
+      }],
+    ];
+    const result = { passed: 0, total: scenarios.length, failures: [] };
+    for (const [scenario, run] of scenarios) {
+      try { await run(); result.passed++; }
+      catch (error) { result.failures.push({ scenario, message: error.message }); }
+    }
+    const output = document.createElement("pre");
+    output.id = "result";
+    output.textContent = JSON.stringify(result);
+    document.body.append(output);
+  </script>
+</body>
+</html>
