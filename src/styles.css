@@ -29,7 +29,7 @@ button { cursor: pointer; }
 .search-icon svg { display: block; width: 22px; height: 22px; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; }
 .input-row input { min-width: 0; flex: 1; border: 0; outline: 0; color: #20262d; background: transparent; font-size: 18px; letter-spacing: .01em; }
 .input-row input::placeholder { color: rgba(42,49,59,.56); }
-.settings-trigger, .icon-button { border: 0; color: rgba(42,49,59,.56); background: transparent; }
+.settings-trigger { border: 0; color: rgba(42,49,59,.56); background: transparent; }
 .settings-trigger { padding: 5px 7px; border: 1px solid rgba(42,49,59,.14); border-radius: 7px; font-size: 11px; }
 .results-panel { flex: 1; min-height: 0; display: flex; flex-direction: column; box-shadow: inset 0 1px 0 rgba(42,49,59,.09); }
 .results { flex: 1; min-height: 0; overflow-y: auto; overscroll-behavior: contain; padding: 0 8px; }
@@ -63,16 +63,22 @@ button { cursor: pointer; }
 .plugin-frame { display: block; width: 100%; height: 100%; border: 0; background: transparent; }
 /* 加载中（view.ready 之前）不可见也不可点，但保持可聚焦，便于插件挂载时取得焦点 */
 .plugin-frame.loading { opacity: 0; pointer-events: none; }
-.settings-panel { min-height: 100%; padding: 16px 20px 20px; }
-.settings-toolbar { display: flex; align-items: center; justify-content: space-between; gap: 20px; min-height: 36px; }
-.settings-heading { display: flex; align-items: center; gap: 8px; flex-shrink: 0; }
-.settings-heading h1 { margin: 0; font-size: 14px; font-weight: 600; }
-.icon-button { display: grid; place-items: center; width: 26px; height: 28px; padding: 4px; border-radius: 7px; }
-.icon-button svg { width: 18px; height: 18px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
-.icon-button:hover { background: rgba(42,49,59,.07); }
-.settings-tabs { display: flex; gap: 2px; padding: 2px; border-radius: 8px; background: rgba(42,49,59,.06); }
-.settings-tabs button { height: 26px; padding: 0 14px; border: 0; border-radius: 6px; color: #5b636b; background: transparent; font-size: 12px; }
-.settings-tabs button:hover { color: #262b31; }
-.settings-tabs button[aria-selected="true"] { color: #262b31; background: rgba(255,255,255,.72); box-shadow: 0 1px 2px rgba(42,49,59,.1); }
-.settings-toolbar button:focus-visible { outline: 2px solid #72998a; outline-offset: 2px; }
+.settings-view .input-row { display: none; }
+.settings-content { flex: 1; height: auto; min-height: 0; border-top: 0; overflow: hidden; }
+.settings-panel { display: grid; grid-template-columns: 172px minmax(0, 1fr); height: 100%; }
+.settings-sidebar { padding: 22px 12px; border-right: 1px solid rgba(42,49,59,.09); background: rgba(42,49,59,.025); }
+.settings-back { display: flex; align-items: center; gap: 5px; height: 28px; padding: 0 8px; border: 0; border-radius: 7px; color: rgba(42,49,59,.56); background: transparent; font-size: 11px; }
+.settings-back svg { width: 16px; height: 16px; fill: none; stroke: currentColor; stroke-width: 1.6; stroke-linecap: round; stroke-linejoin: round; }
+.settings-back:hover { color: #262b31; background: rgba(42,49,59,.045); }
+.settings-sidebar h1 { margin: 28px 12px 10px; color: rgba(42,49,59,.45); font-size: 11px; font-weight: 500; cursor: grab; }
+.settings-icon { display: block; width: 20px; height: 20px; flex: 0 0 20px; }
+.settings-main { min-width: 0; min-height: 0; padding: 32px 32px 30px; overflow: auto; overscroll-behavior: contain; scrollbar-width: none; }
+.settings-main::-webkit-scrollbar { display: none; }
+.settings-main .plugin-manager { margin-top: 0; }
+.settings-main .plugin-manager h2 { font-size: 20px; font-weight: 600; letter-spacing: -.02em; }
+.settings-tabs { display: flex; flex-direction: column; gap: 4px; }
+.settings-tabs button { display: flex; align-items: center; gap: 10px; height: 36px; padding: 0 12px; border: 0; border-radius: 8px; color: rgba(42,49,59,.65); background: transparent; text-align: left; font-size: 12px; }
+.settings-tabs button:hover { color: #262b31; background: rgba(42,49,59,.045); }
+.settings-tabs button[aria-selected="true"] { color: #262b31; background: rgba(42,49,59,.075); }
+.settings-tabs button:focus-visible, .settings-back:focus-visible { outline: 2px solid #72998a; outline-offset: 2px; }
 kbd { padding: 3px 6px; border: 1px solid rgba(42,49,59,.18); border-radius: 5px; font-size: 10px; }

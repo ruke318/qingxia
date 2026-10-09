@@ -1,7 +1,7 @@
 <!doctype html>
 <html lang="zh-CN">
 <head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>主入口唤起回归检查</title></head>
-<body>
+<body style="width: 900px; height: 670px">
   <div id="root"></div>
   <script type="module">
     const callbacks = new Map();
@@ -19,10 +19,11 @@
         }
         if (command === "plugin:event|unlisten") { listeners.delete(args.eventId); return Promise.resolve(); }
         if (command === "begin_search_session") return Promise.resolve(1);
-        if (["list_plugin_commands", "list_shortcuts"].includes(command)) return Promise.resolve([]);
+        if (["list_plugin_commands", "list_plugins"].includes(command)) return Promise.resolve([]);
+        if (command === "list_shortcuts") return Promise.resolve(Array.from({ length: 20 }, (_, index) => ({ id: `test-${index}:open`, group: `测试插件 ${index}`, title: "打开", scope: "global", defaultValue: null, suggested: null, saved: null, active: null, enabled: true, error: null })));
         if (command === "search_files") return Promise.resolve({ requestId: args.requestId, items: [], notice: null });
         if (command === "launcher_ready") { reports.push(args); return Promise.resolve(); }
-        if (["resize_launcher", "set_shortcut_recording", "leave_plugin"].includes(command)) return Promise.resolve();
+        if (["resize_launcher", "set_shortcut_recording", "leave_plugin", "open_settings"].includes(command)) return Promise.resolve();
         throw new Error(`测试收到意外命令：${command}`);
       },
     };
@@ -42,7 +43,7 @@
     localStorage.setItem("qingbox:last-search-query", "测试搜索内容");
     await import("/src/main.tsx");
     const field = () => document.querySelector('[role="combobox"]');
-    await until(() => field() && [...listeners.values()].filter((item) => item.event === "launcher-focus").length === 2, "主入口监听未就绪");
+    await until(() => field() && [...listeners.values()].filter((item) => item.event === "launcher-focus").length === 1, "主入口监听未就绪");
     const scenarios = [
       ["动画帧暂停时仍能确认页面已处理唤起事件", async () => {
         const requestFrame = window.requestAnimationFrame;
@@ -68,10 +69,39 @@
       ["从设置页唤起时回到主入口并报告就绪", async () => {
         emit("show-settings");
         await until(() => document.querySelector('[aria-label="轻匣设置"]'), "未打开设置页");
+        assert(field().getBoundingClientRect().height === 0, "设置页没有收起搜索栏");
         const before = reports.length;
         emit("launcher-focus");
         await until(() => reports.length > before && !document.querySelector('[aria-label="轻匣设置"]'), "没有回到主入口并报告就绪");
         assert(document.activeElement === field() && reports.at(-1).focused && reports.at(-1).visible, "主入口未恢复输入焦点");
+      }],
+      ["设置侧栏固定，长列表仅在内容区滚动", async () => {
+        emit("show-settings");
+        await until(() => document.querySelectorAll(".shortcut-row").length === 20, "快捷键列表未就绪");
+        const sidebar = document.querySelector(".settings-sidebar");
+        const content = document.querySelector(".settings-main");
+        const before = sidebar.getBoundingClientRect();
+        const frame = content.getBoundingClientRect();
+        assert(before.right <= frame.left && frame.right <= 900 && frame.bottom <= 670, "设置布局超出窗口或没有分栏");
+        assert(content.scrollHeight > content.clientHeight && content.scrollWidth === content.clientWidth, "长列表不能纵向滚动或横向溢出");
+        assert(getComputedStyle(content).scrollbarWidth === "none", "设置内容区不应显示右侧滚动条");
+        content.scrollTop = content.scrollHeight;
+        assert(content.scrollTop > 0 && sidebar.getBoundingClientRect().top === before.top, "滚动内容影响了侧栏");
+      }],
+      ["侧栏切换插件管理，返回搜索保留内容并恢复焦点", async () => {
+        document.querySelector('#settings-tab-plugins').click();
+        await until(() => document.querySelector('.plugin-manager'), "插件管理未打开");
+        assert(document.querySelector('#settings-tab-plugins').getAttribute("aria-selected") === "true", "导航选中状态没有同步");
+        document.querySelector('#settings-tab-plugins').dispatchEvent(new KeyboardEvent("keydown", { key: "ArrowUp", bubbles: true, cancelable: true }));
+        await until(() => document.querySelector('.shortcut-settings'), "键盘导航没有切回快捷键");
+        assert(document.activeElement.id === "settings-tab-shortcuts", "导航没有同步焦点");
+        const input = document.querySelector('.shortcut-field-input');
+        input.focus();
+        input.dispatchEvent(new KeyboardEvent("keydown", { key: "Escape", bubbles: true, cancelable: true }));
+        assert(document.querySelector('[aria-label="轻匣设置"]'), "取消快捷键录制时退出了设置页");
+        document.querySelector('[aria-label="返回主入口"]').click();
+        await until(() => !document.querySelector('[aria-label="轻匣设置"]') && document.activeElement === field(), "返回搜索后没有恢复焦点");
+        assert(field().value === "测试搜索内容" && field().getBoundingClientRect().height > 0, "返回后丢失搜索内容或输入框仍被隐藏");
       }],
     ];
     const result = { passed: 0, total: scenarios.length, failures: [] };

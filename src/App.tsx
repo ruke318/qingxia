@@ -1,4 +1,4 @@
-import { useEffect, useRef, useState } from "react";
+import { useCallback, useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
 import { hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, reportLauncherReady, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, toggleFullscreen, startScreenshot, startRecording, onFullscreenToggle, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
@@ -6,6 +6,7 @@ import type { ActionResult, PluginCommand, PluginResult, SearchResult } from "./
 import { FileIcon } from "./components/FileIcon";
 import { ApplicationIcon } from "./components/ApplicationIcon";
 import { PluginIcon } from "./components/PluginIcon";
+import { SettingsIcon } from "./components/SettingsIcon";
 import { PluginManager } from "./features/plugins/PluginManager";
 import { PluginFrame } from "./features/plugins/PluginFrame";
 import { ShortcutSettings } from "./features/shortcuts/ShortcutSettings";
@@ -24,16 +25,20 @@ function SettingsPanel({ onClose }: { onClose: () => void }) {
   const tabs: [SettingsTab, string][] = [["shortcuts", "快捷键"], ["plugins", "插件"]];
   return (
     <section className="settings-panel" aria-label="轻匣设置">
-      <div className="settings-toolbar">
-        <div className="settings-heading">
-          <button className="icon-button" onClick={onClose} aria-label="返回主入口"><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5" /></svg></button>
-          <h1>设置</h1>
+      <aside className="settings-sidebar" data-tauri-drag-region>
+        <button className="settings-back" onClick={onClose} aria-label="返回主入口" autoFocus><svg viewBox="0 0 20 20" aria-hidden="true"><path d="m12 5-5 5 5 5" /></svg>返回搜索</button>
+        <h1 data-tauri-drag-region>设置</h1>
+        <div className="settings-tabs" role="tablist" aria-label="设置分类" aria-orientation="vertical">
+          {tabs.map(([id, label], index) => <button key={id} role="tab" id={`settings-tab-${id}`} tabIndex={tab === id ? 0 : -1} aria-selected={tab === id} aria-controls="settings-tab-panel" onClick={() => setTab(id)} onKeyDown={(event) => {
+            if (!["ArrowUp", "ArrowDown", "Home", "End"].includes(event.key)) return;
+            event.preventDefault();
+            const next = event.key === "Home" ? 0 : event.key === "End" ? tabs.length - 1 : (index + (event.key === "ArrowDown" ? 1 : -1) + tabs.length) % tabs.length;
+            setTab(tabs[next][0]);
+            document.getElementById(`settings-tab-${tabs[next][0]}`)?.focus();
+          }}><SettingsIcon name={id} />{label}</button>)}
         </div>
-        <div className="settings-tabs" role="tablist" aria-label="设置分类">
-          {tabs.map(([id, label]) => <button key={id} role="tab" id={`settings-tab-${id}`} aria-selected={tab === id} aria-controls="settings-tab-panel" onClick={() => setTab(id)}>{label}</button>)}
-        </div>
-      </div>
-      <div id="settings-tab-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
+      </aside>
+      <div className="settings-main" id="settings-tab-panel" role="tabpanel" aria-labelledby={`settings-tab-${tab}`}>
         {tab === "shortcuts" ? <ShortcutSettings /> : <PluginManager />}
       </div>
     </section>
@@ -55,7 +60,7 @@ type View = "launcher" | "settings" | "plugin";
 /** 当前插件实例：同一时间只有一个 iframe；shown 为 Rust 显示该实例的次数。 */
 type ActivePlugin = { token: string; url: string; command?: string; shown: number };
 
-function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View; plugin: ActivePlugin | null; onSettings: () => void; onPlugin: () => void; onReturn: () => void }) {
+function Launcher({ view, plugin, onSettings, onPlugin, onReturn, onActivate }: { view: View; plugin: ActivePlugin | null; onSettings: () => void; onPlugin: () => void; onReturn: () => void; onActivate: () => void }) {
   const inputRef = useRef<HTMLInputElement>(null);
   const resultsRef = useRef<HTMLDivElement>(null);
   const noticeRef = useRef<HTMLParagraphElement>(null);
@@ -96,6 +101,8 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
       requestRef.current = nextQueryRequestId();
       // 保留搜索内容，每次唤起仍刷新查询，避免同词重开时沿用过期请求。
       flushSync(() => {
+        // 设置页收起了搜索栏，先恢复主入口再聚焦并报告就绪。
+        onActivate();
         setIsComposing(false);
         setActivation((current) => current + 1);
       });
@@ -111,7 +118,7 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
       else unlisten = dispose;
     });
     return () => { cancelled = true; unlisten?.(); };
-  }, []);
+  }, [onActivate]);
 
   useEffect(() => {
     let cancelled = false;
@@ -240,7 +247,7 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
   }
 
   return (
-    <main className={`launcher${view !== "launcher" || items.length || notice ? " expanded" : ""}`}>
+    <main className={`launcher${view !== "launcher" || items.length || notice ? " expanded" : ""}${view === "settings" ? " settings-view" : ""}`}>
       <div className="input-row" onMouseDown={(event) => {
         if (!isDesktop || event.button !== 0 || (event.target as HTMLElement).closest("input,button")) return;
         event.preventDefault();
@@ -252,7 +259,7 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
         <input ref={inputRef} autoFocus autoComplete="off" autoCorrect="off" autoCapitalize="off" spellCheck={false} value={query} onChange={(event) => { if (view !== "launcher") onReturn(); setHostNotice(null); setQuery(event.target.value); }} onCompositionStart={handleCompositionStart} onCompositionEnd={handleCompositionEnd} onKeyDown={handleKeyDown} placeholder="搜索插件、应用、文件或目录…" aria-label="搜索应用、文件或目录" role="combobox" aria-autocomplete="list" aria-controls={view === "launcher" && items.length ? "search-results" : undefined} aria-expanded={view === "launcher" && items.length > 0} aria-activedescendant={view === "launcher" && items.length ? `result-${activeIndex}` : undefined} />
         <button className="settings-trigger" onClick={() => { void openSettings(); onSettings(); }} aria-label="设置" aria-expanded={view === "settings"}>⌘,</button>
       </div>
-      {view === "settings" && <div className="content-area"><SettingsPanel onClose={onReturn} /></div>}
+      {view === "settings" && <div className="content-area settings-content"><SettingsPanel onClose={onReturn} /></div>}
       {(view === "plugin" || plugin) && <div className="content-area plugin-content" aria-label="插件内容区域" hidden={view !== "plugin"}>
         {plugin && <PluginFrame key={plugin.token} token={plugin.token} url={plugin.url} command={plugin.command} shown={plugin.shown} />}
       </div>}
@@ -277,6 +284,7 @@ export default function App() {
   const [plugin, setPlugin] = useState<ActivePlugin | null>(null);
   const viewRef = useRef(view);
   viewRef.current = view;
+  const activateLauncher = useCallback(() => setView("launcher"), []);
 
   useEffect(() => {
     let cancelled = false;
@@ -291,7 +299,6 @@ export default function App() {
       }),
       onPluginClosed((token) => setPlugin((current) => current?.token === token ? null : current)),
       onPluginError(() => setView("launcher")),
-      onLauncherFocus(() => setView("launcher")),
       // 全屏只对插件生效；离开插件、重新唤起时由原生层恢复普通尺寸。
       onFullscreenToggle(() => { if (viewRef.current === "plugin") void toggleFullscreen(); }),
     ]).then((callbacks) => {
@@ -312,7 +319,7 @@ export default function App() {
     return () => window.removeEventListener("keydown", handleEscape);
   }, [view]);
 
-  return <Launcher view={view} plugin={plugin} onSettings={() => setView("settings")} onPlugin={() => setView("plugin")} onReturn={() => {
+  return <Launcher view={view} plugin={plugin} onActivate={activateLauncher} onSettings={() => setView("settings")} onPlugin={() => setView("plugin")} onReturn={() => {
     void leavePlugin();
     setView("launcher");
   }} />;

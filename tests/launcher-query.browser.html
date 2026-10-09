@@ -32,6 +32,7 @@
           return Promise.resolve(listenerId);
         }
         if (command === "get_settings") return Promise.resolve({ shortcut: "Alt+Space", shortcutError: null });
+        if (command === "list_shortcuts") return Promise.resolve([]);
         if (command === "list_plugin_commands") return Promise.resolve([{ id: "json-tools:open", title: "JSON 编辑器", pluginName: "JSON 编辑器", keywords: ["json"], icon: testIcon }]);
         if (command === "list_plugins") return Promise.resolve([{ id: "json-tools", name: "JSON 编辑器", version: "0.1.0", enabled: true, source: "bundled", error: null, commands: [{ id: "json-tools:open", title: "JSON 编辑器" }], icon: testIcon }]);
         if (command === "begin_search_session") {
@@ -88,7 +89,7 @@
     async function run() {
       localStorage.setItem("qingbox:last-search-query", "恢复的搜索");
       await import("/src/main.tsx");
-      await until(() => document.querySelector('[role="combobox"]') && [...listeners.values()].filter((item) => item.event === "launcher-focus").length === 2, "主入口监听器未就绪");
+      await until(() => document.querySelector('[role="combobox"]') && [...listeners.values()].filter((item) => item.event === "launcher-focus").length === 1, "主入口监听器未就绪");
       await until(() => pending.length > 0, "启动后没有重新查询保存的搜索词");
       assert(document.querySelector('[role="combobox"]').value === "恢复的搜索" && pending.at(-1).query === "恢复的搜索", "启动后没有恢复保存的搜索词");
       respond(pending.at(-1), "恢复结果.json");
@@ -130,6 +131,7 @@
       const closing = await query("进入设置前");
       document.querySelector('[aria-label="设置"]').click();
       await until(() => document.querySelector('[aria-label="轻匣设置"]'), "未进入设置");
+      document.querySelector('#settings-tab-plugins').click();
       await until(() => document.querySelector('.plugin-manager .plugin-icon')?.naturalWidth > 0, "插件管理没有加载插件配置的图标");
       const resizeCount = calls.filter((item) => item.command === "resize_launcher").length;
       respond(closing, "旧设置结果.json");
@@ -162,7 +164,7 @@
         respond(request, `结果${index}.json`);
         await until(() => resultName() === `结果${index}.json`, "连续搜索后丢失结果");
       }
-      assert([...listeners.values()].filter((item) => item.event === "launcher-focus").length === 2, "重新唤起后重复注册监听器");
+      assert([...listeners.values()].filter((item) => item.event === "launcher-focus").length === 1, "重新唤起后重复注册监听器");
       assert(localStorage.getItem("qingbox:last-search-query") === "连续搜索11", "输入变化后未保存最后一个搜索词");
       completed.push("连续唤起 12 轮保留搜索词与结果、全选输入、恢复高度并重新查询，无监听器累积");
 

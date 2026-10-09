@@ -1,6 +1,6 @@
 <!doctype html>
 <html lang="zh-CN">
-<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>快捷键设置回归检查</title></head>
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><link rel="stylesheet" href="/src/styles.css"><title>快捷键设置回归检查</title></head>
 <body style="margin:0;width:720px">
   <div id="root"></div>
   <script type="module">
@@ -9,6 +9,8 @@
     let rows = [
       row("launcher", "轻匣", "唤起轻匣", { defaultValue: "Alt+Space", saved: "Alt+Space", active: "Alt+Space" }),
       row("fullscreen", "轻匣", "插件全屏", { scope: "panel", defaultValue: "Super+Control+F", saved: "Super+Shift+F", active: "Super+Shift+F" }),
+      row("screenshot", "轻匣", "截图", { saved: "Super+Shift+X", active: "Super+Shift+X", suggested: "Alt+Shift+A" }),
+      row("recording", "轻匣", "录屏", { saved: "Super+Shift+R", active: "Super+Shift+R", suggested: "Alt+Shift+R" }),
       // 旧版本保存的非规范写法，用来检查组合与顺序无关
       row("clipboard-history:open", "剪贴板", "剪贴板", { suggested: "Alt+Shift+V", saved: "Shift+Alt+V", active: "Shift+Alt+V" }),
       row("json-tools:open", "格式化编辑器", "格式化编辑器", { suggested: "Alt+J" }),
@@ -64,28 +66,45 @@
     const press = (label, code, modifiers = {}, key = code) => input(label).dispatchEvent(new KeyboardEvent("keydown", { key, code, bubbles: true, cancelable: true, ...modifiers }));
     const recordingCalls = () => calls.filter((call) => call.command === "set_shortcut_recording").map((call) => call.args.recording);
 
-    const result = { passed: 0, total: 9, failures: [] };
+    const result = { passed: 0, total: 13, failures: [] };
     const scenarios = [
       ["按插件分组列出全部命令", async () => {
         await until(() => rowOf("二维码"), "未列出快捷键");
         const groups = [...document.querySelectorAll(".shortcut-group h3")].map((item) => item.textContent);
-        assert(groups.join("|") === "轻匣|插件", `分组不正确：${groups.join("|")}`);
-        assert(rowOf("编码工具 · 哈希").querySelector(".shortcut-title").textContent === "编码工具哈希", "多命令插件应在插件名后标出命令");
+        assert(groups.join("|") === "常用操作|插件快捷键", `分组不正确：${groups.join("|")}`);
+        assert(document.querySelector('.shortcut-featured input[aria-label="唤起轻匣快捷键"]'), "唤起快捷键应单独突出显示");
+        assert(rowOf("编码工具 · 哈希").querySelector(".shortcut-title").textContent === "哈希", "子命令不应重复插件名称");
         assert(rowOf("剪贴板").querySelector(".shortcut-title").textContent === "剪贴板", "单命令插件只显示插件名");
-        const left = [...document.querySelectorAll(".shortcut-field")].map((item) => Math.round(item.getBoundingClientRect().left));
-        assert(new Set(left).size === 1, `各行录制框应左对齐：${left.join(",")}`);
-        assert(document.querySelectorAll(".shortcut-row").length === 7, "多命令插件应分行列出");
+        const right = [...document.querySelectorAll('.shortcut-group .shortcut-field')].map((item) => Math.round(item.getBoundingClientRect().right));
+        assert(new Set(right).size === 1, `各行键帽应右对齐：${right.join(",")}`);
+        assert(document.querySelectorAll(".shortcut-row").length === 9, "全部快捷键应保留，子命令分行列出");
         assert(rowOf("编码工具 · 哈希"), "多命令插件的行名称应带命令标题");
         assert(rowOf("插件全屏").textContent.includes("面板内"), "全屏应标注只在面板内生效");
       }],
       ["各行状态与可用操作", async () => {
         assert(input("二维码").disabled && status("二维码") === "插件已停用，未生效", "停用插件应不可编辑并标注未生效");
         assert(status("编码工具 · 哈希").includes("注册失败"), "注册失败原因应显示在该行");
-        assert(button("插件全屏", "恢复默认"), "与默认值不同时应提供恢复默认");
+        assert(!document.querySelector('[aria-haspopup="menu"], [role="menu"]'), "快捷键设置不应再显示三点菜单");
+        assert(button("插件全屏", "恢复默认"), "与默认值不同时应直接提供恢复默认");
         assert(!button("唤起轻匣", "恢复默认") && !button("唤起轻匣", "清除"), "默认值未改动时不提供恢复默认，唤起不能清除");
         assert(!button("剪贴板", "建议"), "已保存值与建议值顺序不同但组合相同，不应再提示建议");
-        assert(button("格式化编辑器", "建议")?.textContent === "建议 ⌥J", "应显示插件建议的快捷键");
+        assert(button("格式化编辑器", "建议")?.textContent === "建议 ⌥J", "应直接显示插件建议的快捷键");
+        assert(button("截图", "建议")?.textContent === "建议 ⌥⇧A", "已有自定义值时仍应直接显示建议");
+        assert(!button("剪贴板", "清除"), "不应再提供单独的清除按钮");
         assert(keys("剪贴板") === "⌥⇧V", `键帽应按规范顺序显示：${keys("剪贴板")}`);
+      }],
+      ["录入提示位于快捷键框内，聚焦和输入都不增加行高", async () => {
+        const row = rowOf("截图");
+        const before = row.getBoundingClientRect().height;
+        input("截图").focus();
+        await until(() => row.querySelector('.shortcut-field.recording'), "未进入录制状态");
+        assert(row.querySelector('.shortcut-field-keys').textContent === "按下组合键", "录入提示应放在快捷键框内");
+        assert(!status("截图") && row.getBoundingClientRect().height === before, "聚焦时不应新增下面的提示或改变行高");
+        press("截图", "KeyB", { altKey: true }, "∫");
+        await until(() => button("截图", "保存"), "未生成快捷键草稿");
+        assert(keys("截图") === "⌥B" && !status("截图") && row.getBoundingClientRect().height === before, "录入后应显示键帽，不能在下面增加操作提示");
+        press("截图", "Escape", {}, "Escape");
+        await until(() => keys("截图") === "⌘⇧X", "取消录制后未恢复原组合键");
       }],
       ["录制时通知宿主并识别顺序不同的重复组合", async () => {
         input("格式化编辑器").focus();
@@ -117,8 +136,10 @@
         input("格式化编辑器").focus();
         press("格式化编辑器", "KeyJ", { altKey: true }, "∆");
         await until(() => button("格式化编辑器", "保存") && !button("格式化编辑器", "保存").disabled, "有效组合应可保存");
+        const before = rowOf("格式化编辑器").getBoundingClientRect().height;
         button("格式化编辑器", "保存").click();
         await until(() => status("格式化编辑器") === "已保存", "保存后应提示已保存");
+        assert(rowOf("格式化编辑器").getBoundingClientRect().height === before, "保存成功提示也不应增加行高");
         const request = calls.findLast((call) => call.command === "save_shortcut_binding");
         assert(request.args.id === "json-tools:open" && request.args.shortcut === "Alt+J", `保存参数不正确：${JSON.stringify(request.args)}`);
         assert(keys("格式化编辑器") === "⌥J" && !button("格式化编辑器", "建议"), "保存后应显示新值，建议与已保存值相同时不再提示");
@@ -134,8 +155,13 @@
         failSave = null;
         button("编码工具 · 编码 / 解码", "取消").click();
       }],
-      ["清除插件快捷键", async () => {
-        button("剪贴板", "清除").click();
+      ["退格清除插件快捷键，保存后生效", async () => {
+        const before = calls.filter((call) => call.command === "save_shortcut_binding").length;
+        input("剪贴板").focus();
+        press("剪贴板", "Backspace", {}, "Backspace");
+        await until(() => button("剪贴板", "保存"), "退格未产生清除草稿");
+        assert(!keys("剪贴板") && calls.filter((call) => call.command === "save_shortcut_binding").length === before, "退格应先清空草稿，不能立即改动系统绑定");
+        button("剪贴板", "保存").click();
         await until(() => status("剪贴板") === "已清除", "清除后应提示");
         const request = calls.findLast((call) => call.command === "save_shortcut_binding");
         assert(request.args.id === "clipboard-history:open" && request.args.shortcut === null, "清除应传 null");
@@ -145,6 +171,41 @@
         rows = rows.map((item) => item.id === "json-tools:open" ? { ...item, saved: "Alt+K", active: "Alt+K" } : item);
         emit("shortcuts-changed");
         await until(() => keys("格式化编辑器") === "⌥K", "收到变更通知后应重新读取");
+      }],
+      ["折叠插件命令时结束录制，重新展开保留草稿", async () => {
+        const group = rowOf("编码工具 · 编码 / 解码").closest("details");
+        assert(group?.open, "多命令插件应默认展开");
+        input("编码工具 · 编码 / 解码").focus();
+        press("编码工具 · 编码 / 解码", "KeyB", { altKey: true }, "∫");
+        await until(() => button("编码工具 · 编码 / 解码", "保存"), "未产生草稿");
+        group.querySelector("summary").click();
+        await until(() => !group.open && recordingCalls().at(-1) === false, "折叠隐藏的录制框必须结束宿主录制");
+        assert(group.getBoundingClientRect().height <= group.querySelector("summary").getBoundingClientRect().height + 1, "折叠后子命令仍占据空间");
+        group.querySelector("summary").click();
+        await until(() => group.open, "未重新展开");
+        assert(keys("编码工具 · 编码 / 解码") === "⌥B", "折叠不能丢失未保存草稿");
+        button("编码工具 · 编码 / 解码", "取消").click();
+      }],
+      ["建议值直接可见，点击后生成草稿且可以取消", async () => {
+        const before = calls.filter((call) => call.command === "save_shortcut_binding").length;
+        const suggestion = button("截图", "建议");
+        assert(suggestion && suggestion.getBoundingClientRect().height > 0, "建议值必须直接可见");
+        const hint = suggestion.getBoundingClientRect();
+        const field = rowOf("截图").querySelector('.shortcut-field').getBoundingClientRect();
+        assert(hint.right < field.left && Math.abs((hint.top + hint.bottom) / 2 - (field.top + field.bottom) / 2) < 1, "建议值应放在键帽左侧并在同一行居中");
+        suggestion.click();
+        await until(() => button("截图", "保存"), "选择建议未产生草稿");
+        assert(keys("截图") === "⌥⇧A" && calls.filter((call) => call.command === "save_shortcut_binding").length === before, "选择建议不应立即修改系统绑定");
+        button("截图", "取消").click();
+        await until(() => keys("截图") === "⌘⇧X" && button("截图", "建议"), "取消建议后没有恢复原值");
+      }],
+      ["行内恢复默认仍需确认保存", async () => {
+        const before = calls.filter((call) => call.command === "save_shortcut_binding").length;
+        button("插件全屏", "恢复默认").click();
+        await until(() => button("插件全屏", "保存"), "恢复默认未进入待保存状态");
+        assert(keys("插件全屏") === "⌘⌃F" && !document.querySelector('[role="menu"]'), "默认键帽或菜单关闭状态不正确");
+        assert(calls.filter((call) => call.command === "save_shortcut_binding").length === before, "选择默认值不应立即改动系统绑定");
+        button("插件全屏", "取消").click();
       }],
     ];
     for (const [scenario, run] of scenarios) {

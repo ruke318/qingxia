@@ -82,52 +82,58 @@ export function PluginManager() {
       </div>
       {error && !operationPlugin && <p className="plugin-manager-error" role="alert">{error}</p>}
       {pending && !operationPlugin && <p className="plugin-manager-status" role="status">{pending}…</p>}
-      {!pending && !error && plugins.length === 0 && <p className="plugin-manager-empty">还没有插件，从本地导入一个开始使用。</p>}
-      <ul className="plugin-manager-list" aria-busy={pending !== null} aria-label="已安装插件">
-        {plugins.map((plugin) => {
-          const command = plugin.commands[0];
-          return (
-            <li className="plugin-manager-item" key={plugin.id}>
-              <div className="plugin-manager-row">
-                <PluginIcon icon={plugin.icon} />
-                <div className="plugin-manager-info">
-                  <strong title={plugin.name}>{plugin.name}</strong>
-                  <span>{plugin.version} · {plugin.source === "bundled" ? "内置" : "本地"}</span>
-                </div>
-                <button type="button" className="plugin-manager-open"
-                  disabled={disabled || !plugin.enabled || !!plugin.error || !command}
-                  title={command?.title ?? "此插件没有可打开的命令"}
-                  onClick={() => {
-                    if (command) void perform("打开插件", () => invoke<void>("open_plugin", { command: command.id }), plugin.id);
-                  }}>打开</button>
-                <button type="button" className="plugin-manager-switch" role="switch" aria-checked={plugin.enabled}
-                  aria-label={`启用${plugin.name}`} title={plugin.enabled ? "停用插件" : "启用插件"} disabled={disabled}
-                  onClick={() => void perform(plugin.enabled ? "停用插件" : "启用插件", () => invoke<PluginInfo[]>("set_plugin_enabled", { id: plugin.id, enabled: !plugin.enabled }), plugin.id)}>
-                  <span />
-                </button>
-                {/* 固定宽度的移除位，内置插件留空，保证各行按钮对齐 */}
-                <span className="plugin-manager-slot">
-                  {plugin.source === "local" && <button type="button" className="plugin-manager-remove" disabled={disabled}
-                    aria-label={`移除${plugin.name}`} onClick={() => setRemoving(plugin.id)}>移除</button>}
-                </span>
-              </div>
-              {removing === plugin.id && <div className="plugin-manager-confirm" role="group" aria-label={`确认移除${plugin.name}`}>
-                <span>移除“{plugin.name}”？保留插件数据和原始导入目录。</span>
-                <button type="button" className="plugin-manager-open" disabled={disabled} onClick={() => setRemoving(null)}>取消</button>
-                <button type="button" className="plugin-manager-remove" disabled={disabled}
-                  onClick={() => void perform("移除插件", async () => {
-                    const items = await invoke<PluginInfo[]>("remove_plugin", { id: plugin.id });
-                    if (mounted.current) setRemoving(null);
-                    return items;
-                  }, plugin.id)}>确认移除</button>
-              </div>}
-              {operationPlugin === plugin.id && error && <p className="plugin-manager-item-error" role="alert">{error}</p>}
-              {operationPlugin === plugin.id && pending && <p className="plugin-manager-status" role="status">{pending}…</p>}
-              {plugin.error && <p className="plugin-manager-item-error">{plugin.error}</p>}
-            </li>
-          );
-        })}
-      </ul>
+      {([["bundled", "内置插件"], ["local", "本地插件"]] as const).map(([source, label]) => {
+        const items = plugins.filter((plugin) => plugin.source === source);
+        return <section className="plugin-manager-group" key={source} aria-label={label} aria-busy={pending !== null}>
+          <h3>{label}<span>{items.length}</span></h3>
+          {!pending && !error && items.length === 0 && <p className="plugin-manager-empty">{source === "local" ? "还没有本地插件，可从右上角导入。" : "暂无内置插件。"}</p>}
+          <ul className="plugin-manager-list" aria-label={`${label}列表`}>
+            {items.map((plugin) => {
+              const command = plugin.commands[0];
+              return (
+                <li className="plugin-manager-item" key={plugin.id}>
+                  <div className="plugin-manager-row">
+                    <PluginIcon icon={plugin.icon} />
+                    <div className="plugin-manager-info">
+                      <strong title={plugin.name}>{plugin.name}</strong>
+                      <span>{plugin.version}</span>
+                    </div>
+                    <button type="button" className="plugin-manager-open"
+                      disabled={disabled || !plugin.enabled || !!plugin.error || !command}
+                      title={command?.title ?? "此插件没有可打开的命令"}
+                      onClick={() => {
+                        if (command) void perform("打开插件", () => invoke<void>("open_plugin", { command: command.id }), plugin.id);
+                      }}>打开</button>
+                    <button type="button" className="plugin-manager-switch" role="switch" aria-checked={plugin.enabled}
+                      aria-label={`启用${plugin.name}`} title={plugin.enabled ? "停用插件" : "启用插件"} disabled={disabled}
+                      onClick={() => void perform(plugin.enabled ? "停用插件" : "启用插件", () => invoke<PluginInfo[]>("set_plugin_enabled", { id: plugin.id, enabled: !plugin.enabled }), plugin.id)}>
+                      <span />
+                    </button>
+                    {/* 固定宽度的移除位，内置插件留空，保证各行按钮对齐 */}
+                    <span className="plugin-manager-slot">
+                      {plugin.source === "local" && <button type="button" className="plugin-manager-remove" disabled={disabled}
+                        aria-label={`移除${plugin.name}`} onClick={() => setRemoving(plugin.id)}>移除</button>}
+                    </span>
+                  </div>
+                  {removing === plugin.id && <div className="plugin-manager-confirm" role="group" aria-label={`确认移除${plugin.name}`}>
+                    <span>移除“{plugin.name}”？保留插件数据和原始导入目录。</span>
+                    <button type="button" className="plugin-manager-open" disabled={disabled} onClick={() => setRemoving(null)}>取消</button>
+                    <button type="button" className="plugin-manager-remove" disabled={disabled}
+                      onClick={() => void perform("移除插件", async () => {
+                        const items = await invoke<PluginInfo[]>("remove_plugin", { id: plugin.id });
+                        if (mounted.current) setRemoving(null);
+                        return items;
+                      }, plugin.id)}>确认移除</button>
+                  </div>}
+                  {operationPlugin === plugin.id && error && <p className="plugin-manager-item-error" role="alert">{error}</p>}
+                  {operationPlugin === plugin.id && pending && <p className="plugin-manager-status" role="status">{pending}…</p>}
+                  {plugin.error && <p className="plugin-manager-item-error">{plugin.error}</p>}
+                </li>
+              );
+            })}
+          </ul>
+        </section>;
+      })}
       <p className="plugin-manager-hint">选择包含 manifest.json 的插件文件夹</p>
     </section>
   );
