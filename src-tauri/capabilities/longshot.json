@@ -1,0 +1,15 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "longshot-capability",
+  "description": "长截图控制面板：只能完成、导出或取消本会话的长截图",
+  "webviews": [
+    "longshot-*"
+  ],
+  "permissions": [
+    "core:event:allow-listen",
+    "core:event:allow-unlisten",
+    "allow-capture-long-finish",
+    "allow-capture-long-export",
+    "allow-capture-long-cancel"
+  ]
+}

@@ -91,6 +91,21 @@ export function CaptureOverlay() {
   const [selected, setSelected] = useState<number | null>(null);
   const [text, setText] = useState<TextEdit | null>(null);
   const [snapshot, setSnapshot] = useState<HTMLImageElement | null>(null);
+  // 长截图：遮罩可穿透、只保留选区边框，用户滚动下方的内容
+  const [longShot, setLongShot] = useState(false);
+
+  async function startLongShot() {
+    if (!selection || !context || busy) return;
+    setError(null);
+    setTool(null);
+    setLongShot(true);
+    try {
+      await invoke("capture_long_start", { session: context.session, rect: selection });
+    } catch (failure) {
+      setLongShot(false);
+      setError(failure instanceof Error ? failure.message : String(failure));
+    }
+  }
   const drag = useRef<Drag | null>(null);
   const stroke = useRef<Stroke | null>(null);
   const nextId = useRef(1);
@@ -417,9 +432,9 @@ export function CaptureOverlay() {
   const panelAbove = toolbar ? toolbar.top + TOOLBAR_HEIGHT + 46 > window.innerHeight : false;
   return (
     <>
-    {context?.image && <img className="capture-snapshot" src={context.image} alt="" draggable={false} onLoad={() => { if (isTauri()) void invoke("capture_ready", { session: context.session }); }} />}
+    {context?.image && !longShot && <img className="capture-snapshot" src={context.image} alt="" draggable={false} onLoad={() => { if (isTauri()) void invoke("capture_ready", { session: context.session }); }} />}
     <main className={`capture-overlay${visible || highlight ? " has-selection" : ""}`} aria-label="截图" onMouseDown={(event) => begin(event, "draw")}>
-      <p className="capture-hint">{visible ? (tool ? "按住 ⇧ 吸附角度 · ⌘Z 撤销 · 回车复制" : "回车复制 · ⌘S 保存 · Esc 取消") : "单击选择窗口 · 拖动框选区域 · Esc 取消"}</p>
+      <p className="capture-hint">{longShot ? "在选区内上下滚动内容 · 回车复制 · ⌘S 保存 · Esc 取消" : visible ? (tool ? "按住 ⇧ 吸附角度 · ⌘Z 撤销 · 回车复制" : "回车复制 · ⌘S 保存 · Esc 取消") : "单击选择窗口 · 拖动框选区域 · Esc 取消"}</p>
       {highlight && (
         <>
           <div className="capture-hover" aria-label="窗口高亮" style={{ left: highlight.x, top: highlight.y, width: highlight.width, height: highlight.height }} />
@@ -430,9 +445,9 @@ export function CaptureOverlay() {
       )}
       {visible && (
         <>
-          <div className={`capture-selection${locked ? " locked" : ""}${tool === "text" ? " text-tool" : ""}`} aria-label="截图选区" style={{ left: selection.x, top: selection.y, width: selection.width, height: selection.height }}
+          <div className={`capture-selection${locked ? " locked" : ""}${tool === "text" ? " text-tool" : ""}${longShot ? " long-shot" : ""}`} aria-label="截图选区" style={{ left: selection.x, top: selection.y, width: selection.width, height: selection.height }}
             onMouseDown={(event) => locked ? beginStroke(event) : begin(event, "move")} onDoubleClick={() => { if (!tool) void exportAs("copy"); }}>
-            {!locked && handles.map(([handle, name]) => (
+            {!locked && !longShot && handles.map(([handle, name]) => (
               <span key={handle} className={`capture-handle capture-handle-${handle}`} aria-label={`调整选区：${name}`} onMouseDown={(event) => begin(event, "resize", handle)} />
             ))}
           </div>
@@ -453,7 +468,7 @@ export function CaptureOverlay() {
                 else if (event.key === "Escape") { event.preventDefault(); discardText.current = true; setText(null); }
               }} />
           )}
-          {!dragging && toolbar && (
+          {!dragging && !longShot && toolbar && (
             <div className="capture-toolbar" role="toolbar" aria-label="截图操作" style={toolbar} onMouseDown={(event) => event.stopPropagation()}>
               {TOOLS.map(([id, name, icon]) => (
                 <button key={id} type="button" aria-label={name} title={name} aria-pressed={tool === id} disabled={busy !== null}
@@ -474,6 +489,9 @@ export function CaptureOverlay() {
               </button>
               <button type="button" aria-label="保存" title="保存…（⌘S）" disabled={busy !== null} onClick={() => void exportAs("save")}>
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M10 3v10M6 9l4 4 4-4M4 16h12" /></svg>
+              </button>
+              <button type="button" aria-label="长截图" title={annotations.length ? "长截图前请先撤销标注" : "长截图：上下滚动内容自动拼接"} disabled={busy !== null || annotations.length > 0} onClick={() => void startLongShot()}>
+                <svg viewBox="0 0 20 20" aria-hidden="true"><rect x="5.5" y="2.5" width="9" height="15" rx="1.5" /><path d="M10 6.5v7M7.8 11.3L10 13.5l2.2-2.2" /></svg>
               </button>
               <button type="button" aria-label="贴图" title="钉在屏幕上" disabled={busy !== null} onClick={() => void exportAs("pin")}>
                 <svg viewBox="0 0 20 20" aria-hidden="true"><path d="M7.5 3.5h5l-.6 4.5 2.6 3H5.5l2.6-3zM10 11v5.5" /></svg>
@@ -509,7 +527,7 @@ export function CaptureOverlay() {
         </>
       )}
     </main>
-    <canvas ref={canvasRef} className="capture-annotations" aria-hidden="true" />
+    {!longShot && <canvas ref={canvasRef} className="capture-annotations" aria-hidden="true" />}
     </>
   );
 }

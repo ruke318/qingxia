@@ -510,6 +510,7 @@ pub fn run() {
         .manage(plugins::PluginState::default())
         .manage(shortcuts::ShortcutState::default())
         .manage(capture::CaptureState::default())
+        .manage(capture::record::RecordState::default())
         .register_uri_scheme_protocol("qingbox-plugin", |context, request| {
             plugins::resource(context.app_handle(), context.webview_label(), request.uri().path())
         })
@@ -519,6 +520,11 @@ pub fn run() {
             let label = context.webview_label().to_string();
             let path = request.uri().path().to_string();
             std::thread::spawn(move || responder.respond(capture::screenshot::serve(&label, &path)));
+        })
+        .register_asynchronous_uri_scheme_protocol("qingbox-record", |context, request, responder| {
+            let label = context.webview_label().to_string();
+            let app = context.app_handle().clone();
+            std::thread::spawn(move || responder.respond(capture::record_files::serve(&app, &label, request)));
         })
         .plugin(tauri_plugin_global_shortcut::Builder::new().build())
         .setup(|app| {
@@ -533,13 +539,15 @@ pub fn run() {
             plugins::initialize(app.handle()).map_err(anyhow::Error::msg)?;
             let show = MenuItem::with_id(app, "show", "打开轻匣", true, None::<&str>)?;
             let settings = MenuItem::with_id(app, "settings", "设置与插件", true, None::<&str>)?;
+            let stop = MenuItem::with_id(app, "record-stop", "停止录屏", true, None::<&str>)?;
             let quit = MenuItem::with_id(app, "quit", "退出轻匣", true, None::<&str>)?;
-            let menu = Menu::with_items(app, &[&show, &settings, &quit])?;
+            let menu = Menu::with_items(app, &[&show, &settings, &stop, &quit])?;
             TrayIconBuilder::new().title("匣").tooltip("轻匣").menu(&menu).on_menu_event(|app, event| {
                 match event.id.as_ref() {
                     "show" => { diag!("菜单栏：打开轻匣"); show_launcher(app) }
                     "settings" => { diag!("菜单栏：设置与插件"); show_settings(app) }
-                    "quit" => app.exit(0),
+                    "record-stop" => capture::record::stop_active(app),
+                    "quit" => { if !capture::record::prepare_exit(app) { app.exit(0); } },
                     _ => {}
                 }
             }).build(app)?;
@@ -553,9 +561,16 @@ pub fn run() {
             show_launcher(app.handle());
             Ok(())
         })
-        .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, capture::start_screenshot_command, capture::capture_cancel, capture::capture_ready, capture::export::capture_export, capture::pin::pin_close, capture::pin::pin_scale, capture::pin::pin_copy, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
+        .invoke_handler(tauri::generate_handler![shortcuts::list_shortcuts, shortcuts::save_shortcut_binding, shortcuts::set_shortcut_recording, capture::record::start_recording_command, capture::record::record_start, capture::record::record_cancel, capture::record::record_status, capture::record::record_stop, capture::record::record_card_action, capture::start_screenshot_command, capture::capture_cancel, capture::capture_ready, capture::long::capture_long_start, capture::long::capture_long_finish, capture::long::capture_long_export, capture::long::capture_long_cancel, capture::export::capture_export, capture::pin::pin_close, capture::pin::pin_scale, capture::pin::pin_copy, toggle_fullscreen, hide_launcher, resize_launcher, open_settings, close_settings, complete_directory, begin_search_session, search_files, get_application_icon, open_path, plugins::list_plugin_commands, plugins::open_plugin, plugins::leave_plugin, plugins::plugin_call, plugins::management::list_plugins, plugins::management::reload_plugins, plugins::management::set_plugin_enabled, plugins::management::import_plugin, plugins::management::remove_plugin])
         .on_window_event(|window, event| {
             // 失焦收起只作用于主面板；截图覆盖窗自行管理焦点与关闭。
+            if window.label().starts_with("record-") {
+                if let WindowEvent::CloseRequested { api, .. } = event {
+                    api.prevent_close();
+                    if window.label().starts_with("record-control-") { capture::record::stop_active(window.app_handle()); }
+                }
+                return;
+            }
             if window.label() != "main" { return }
             if let WindowEvent::Focused(false) = event {
                 diag!("窗口失焦事件：{}", window.label());
@@ -566,6 +581,11 @@ pub fn run() {
                 { plugins::hide_active(window.app_handle()); let _ = window.hide(); }
             }
         })
-        .run(tauri::generate_context!())
-        .expect("轻匣启动失败");
+        .build(tauri::generate_context!())
+        .expect("轻匣启动失败")
+        .run(|app, event| {
+            if let tauri::RunEvent::ExitRequested { api, .. } = event {
+                if capture::record::prepare_exit(app) { api.prevent_exit(); }
+            }
+        });
 }

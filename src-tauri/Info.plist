@@ -2,6 +2,8 @@
 <!DOCTYPE plist PUBLIC "-//Apple//DTD PLIST 1.0//EN" "http://www.apple.com/DTDs/PropertyList-1.0.dtd">
 <plist version="1.0">
 <dict>
+    <key>NSMicrophoneUsageDescription</key>
+    <string>仅在本次录屏开启麦克风时，用于录制您的声音。</string>
     <key>NSDesktopFolderUsageDescription</key>
     <string>用于搜索和打开桌面上的文件与文件夹。</string>
     <key>NSDocumentsFolderUsageDescription</key>

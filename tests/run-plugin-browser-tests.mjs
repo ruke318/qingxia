@@ -12,7 +12,9 @@ import { createServer } from "vite";
 
 const root = fileURLToPath(new URL("..", import.meta.url));
 const pages = [
+  "tests/recording.browser.html",
   "tests/capture-overlay.browser.html",
+  "tests/longshot.browser.html",
   "tests/plugin-manager.browser.html",
   "tests/shortcut-settings.browser.html",
   "plugins/json-tools/tests/editor.browser.html",
@@ -141,7 +143,7 @@ async function main() {
     console.log(`Vite 开发服务：http://127.0.0.1:${port}/`);
     chrome = await launchChrome();
     cdp = await connect(chrome.endpoint);
-    for (const page of pages) {
+    for (const page of process.argv.length > 2 ? process.argv.slice(2) : pages) {
       const { result, errors } = await runPage(cdp, `http://127.0.0.1:${port}/${page}`);
       const ok = result.total > 0 && result.passed === result.total && result.failures.length === 0;
       if (!ok) failed = true;

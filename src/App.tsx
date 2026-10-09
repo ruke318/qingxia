@@ -1,7 +1,7 @@
 import { useEffect, useRef, useState } from "react";
 import { flushSync } from "react-dom";
 import { getCurrentWindow } from "@tauri-apps/api/window";
-import { hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, toggleFullscreen, startScreenshot, onFullscreenToggle, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
+import { hideLauncher, isDesktop, nextQueryRequestId, onLauncherFocus, onShowSettings, openPath, openSettings, queryFiles, resizeLauncher, toggleFullscreen, startScreenshot, startRecording, onFullscreenToggle, listPluginCommands, openPlugin, onPluginError, onPluginOpened, onPluginsChanged, leavePlugin, onPluginLoad, onPluginClosed } from "./lib/bridge";
 import type { ActionResult, PluginCommand, PluginResult, SearchResult } from "./lib/types";
 import { FileIcon } from "./components/FileIcon";
 import { ApplicationIcon } from "./components/ApplicationIcon";
@@ -14,6 +14,7 @@ import { fileType } from "./lib/file-types";
 /** 宿主内置功能，与插件命令一起参与搜索。 */
 const BUILTIN_ACTIONS = [
   { id: "screenshot", title: "截图", keywords: ["截图", "截屏", "screenshot", "jietu", "capture"] },
+  { id: "recording", title: "录屏", keywords: ["录屏", "屏幕录制", "record", "screen recording", "luping"] },
 ];
 
 type SettingsTab = "shortcuts" | "plugins";
@@ -182,8 +183,9 @@ function Launcher({ view, plugin, onSettings, onPlugin, onReturn }: { view: View
     if (!target) return;
     try {
       if (target.kind === "action") {
-        // 宿主收起主面板后开始截图
+        // 宿主收起主面板后开始截图或录屏
         if (target.path === "screenshot") await startScreenshot();
+        if (target.path === "recording") await startRecording();
         return;
       }
       if (target.kind === "plugin") {

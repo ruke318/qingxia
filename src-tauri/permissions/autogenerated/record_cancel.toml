@@ -1,0 +1,11 @@
+# 由构建脚本自动生成，请勿手动修改。
+
+[[permission]]
+identifier = "allow-record-cancel"
+description = "允许调用 record_cancel 命令，窗口与会话范围由宿主校验。"
+commands.allow = ["record_cancel"]
+
+[[permission]]
+identifier = "deny-record-cancel"
+description = "禁止调用 record_cancel 命令。"
+commands.deny = ["record_cancel"]

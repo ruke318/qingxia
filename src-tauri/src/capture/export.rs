@@ -133,7 +133,7 @@ fn remember_directory(app: &AppHandle, directory: &std::path::Path) {
 /// 弹出系统保存对话框，由用户选择位置与文件名；取消时返回 `None`。
 /// 对话框弹出期间隐藏覆盖窗，否则会被屏保层级的覆盖窗挡住；取消后恢复覆盖窗继续编辑。
 #[cfg(target_os = "macos")]
-fn save(app: &AppHandle, overlay_label: &str, png: &[u8]) -> Result<Option<PathBuf>, String> {
+pub(super) fn save(app: &AppHandle, overlay_label: &str, png: &[u8]) -> Result<Option<PathBuf>, String> {
     use objc2::MainThreadMarker;
     use objc2_app_kit::{NSApplication, NSModalResponseOK, NSSavePanel};
     use objc2_foundation::{NSString, NSURL};
@@ -171,7 +171,7 @@ fn save(app: &AppHandle, overlay_label: &str, png: &[u8]) -> Result<Option<PathB
 }
 
 #[cfg(not(target_os = "macos"))]
-fn save(_app: &AppHandle, _overlay_label: &str, _png: &[u8]) -> Result<Option<PathBuf>, String> {
+pub(super) fn save(_app: &AppHandle, _overlay_label: &str, _png: &[u8]) -> Result<Option<PathBuf>, String> {
     Err("当前平台不支持保存截图".into())
 }
 

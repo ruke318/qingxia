@@ -12,6 +12,7 @@ crate-type = ["staticlib", "cdylib", "rlib"]
 
 [build-dependencies]
 tauri-build = { version = "=2.6.3", features = [] }
+cc = "=1.4.7"
 
 [dependencies]
 tauri = { version = "=2.11.5", features = ["tray-icon", "macos-private-api", "unstable"] }
@@ -27,6 +28,7 @@ rusqlite = { version = "0.37", features = ["bundled"] }
 tauri-plugin-global-shortcut = "2"
 tokio = { version = "1", features = ["process", "time", "io-util", "sync", "macros"] }
 getrandom = "0.3"
+png = "0.18"
 
 [target.'cfg(target_os = "macos")'.dependencies]
 core-foundation = "0.10.1"
@@ -36,8 +38,9 @@ block2 = "0.6.2"
 objc2-app-kit = { version = "0.3.2", features = ["NSScreen", "NSEvent", "NSWindow", "NSApplication", "NSWorkspace", "NSRunningApplication", "NSBitmapImageRep", "NSImageRep", "NSGraphics", "objc2-core-graphics"] }
 objc2-foundation = { version = "0.3.2", features = ["NSGeometry", "NSProcessInfo", "NSArray", "NSData", "NSDictionary", "NSError", "NSString", "NSValue"] }
 objc2-core-foundation = "0.3.2"
+objc2-core-media = { version = "0.3.2", default-features = false, features = ["std", "CMTime"] }
 objc2-core-graphics = { version = "0.3.2", features = ["CGWindow"] }
-objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = ["std", "SCScreenshotManager", "SCShareableContent", "SCStream", "objc2-core-graphics", "objc2-core-foundation", "block2"] }
+objc2-screen-capture-kit = { version = "0.3.2", default-features = false, features = ["std", "SCScreenshotManager", "SCShareableContent", "SCStream", "SCRecordingOutput", "libc", "objc2-core-media", "objc2-core-graphics", "objc2-core-foundation", "block2"] }
 
 # 插件 iframe 的 IPC 加固：只接受主 frame 的脚本消息，说明见 patches/wry/轻匣补丁说明.md。
 [patch.crates-io]

@@ -53,6 +53,12 @@ export async function startScreenshot(): Promise<void> {
   await invoke("start_screenshot_command");
 }
 
+/** 宿主内置录屏：声音选择只在本次录屏中生效。 */
+export async function startRecording(): Promise<void> {
+  if (!isDesktop) throw new Error("请在桌面应用中录屏");
+  await invoke("start_recording_command");
+}
+
 export async function toggleFullscreen(): Promise<void> {
   if (isDesktop) await invoke("toggle_fullscreen");
 }

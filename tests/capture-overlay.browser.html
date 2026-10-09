@@ -339,6 +339,19 @@
           expectRect(200, 150, 60, 50);
         } finally { delete context.windows; }
       }],
+      ["长截图：交出选区并进入穿透状态，有标注时不可用", async () => {
+        await drag(overlay(), [100, 120], [300, 280]);
+        tool("长截图").click();
+        await pause();
+        const call = calls.find((call) => call.command === "capture_long_start");
+        assert(call && call.args.session === 12 && JSON.stringify(call.args.rect) === JSON.stringify({ x: 100, y: 120, width: 200, height: 160 }), "应把会话与选区交给宿主");
+        assert(!document.querySelector('[aria-label="截图操作"]') && !document.querySelector(".capture-snapshot") && selection().classList.contains("long-shot"), "长截图时隐藏工具栏与冻结画面，只留边框");
+        await reset();
+        await drag(overlay(), [100, 120], [300, 280]);
+        tool("矩形").click(); await pause();
+        await drag(selection(), [120, 140], [180, 200]);
+        assert(tool("长截图").disabled, "有标注时不能开始长截图");
+      }],
       ["箭头按住 ⇧ 吸附到 45°", async () => {
         const { snapAngle } = await import("../src/capture/annotations.ts");
         const [x, y] = snapAngle(0, 0, 100, 90);

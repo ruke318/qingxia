@@ -1,0 +1,12 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "record-control-capability",
+  "description": "录屏专用窗口仅授予当前角色所需的命令，宿主再次校验会话身份",
+  "webviews": [
+    "record-control-*"
+  ],
+  "permissions": [
+    "allow-record-status",
+    "allow-record-stop"
+  ]
+}

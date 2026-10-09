@@ -10,6 +10,7 @@
     "core:event:allow-unlisten",
     "allow-capture-cancel",
     "allow-capture-export",
-    "allow-capture-ready"
+    "allow-capture-ready",
+    "allow-capture-long-start"
   ]
 }

@@ -116,8 +116,15 @@ pub fn serve(webview_label: &str, path: &str) -> tauri::http::Response<Vec<u8>> 
             None => respond(403, "text/plain", Vec::new()),
         };
     }
+    // 长截图：/<会话>/long.png，只交给对应的长截图面板
+    if let Some(session) = path.trim_start_matches('/').strip_suffix("/long.png").and_then(|id| id.parse().ok()) {
+        return match super::long::image(webview_label, session) {
+            Some(png) => respond(200, "image/png", png.as_ref().clone()),
+            None => respond(403, "text/plain", Vec::new()),
+        };
+    }
     let Some((session, display)) = parse_path(path) else { return respond(404, "text/plain", Vec::new()) };
-    if super::overlay::session_of(webview_label) != Some(session) { return respond(403, "text/plain", Vec::new()) }
+    if super::overlay::session_of(webview_label) != Some(session) && !super::record::authorized(webview_label, session, &["select"]) { return respond(403, "text/plain", Vec::new()) }
     let snapshot = STORE.lock().ok().and_then(|store| {
         let (current, map) = store.as_ref()?;
         (*current == session).then(|| map.get(&display).cloned()).flatten()

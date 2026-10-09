@@ -1,0 +1,172 @@
+<!doctype html>
+<html lang="zh-CN">
+<head>
+<meta charset="UTF-8">
+<title>轻匣介绍动画</title>
+<!--
+  README 介绍动画。画面完全由 renderAt(秒) 决定，便于逐帧渲染：
+  node docs/intro/render.mjs  →  docs/images/intro.webp 与 docs/images/intro.mp4
+  直接用浏览器打开本页会按真实时间循环播放，便于预览。
+-->
+<style>
+  * { box-sizing: border-box; }
+  html, body { margin: 0; width: 1280px; height: 720px; overflow: hidden; }
+  body { position: relative; font-family: -apple-system, BlinkMacSystemFont, "PingFang SC", sans-serif; color: #1f2933; -webkit-font-smoothing: antialiased; background: #f4ecf7; }
+  .layer { position: absolute; inset: 0; }
+  .blob { position: absolute; border-radius: 50%; filter: blur(60px); opacity: .85; }
+  .center { position: absolute; left: 0; right: 0; display: flex; flex-direction: column; align-items: center; }
+
+  #intro { top: 190px; }
+  #intro img { width: 128px; height: 128px; filter: drop-shadow(0 18px 30px rgba(40, 60, 90, .22)); }
+  h1 { margin: 26px 0 0; font-size: 56px; font-weight: 700; letter-spacing: .02em; }
+  h1 span { font-weight: 500; color: #50606f; margin-left: 14px; }
+  .tagline { margin-top: 14px; font-size: 24px; color: #52606d; letter-spacing: .04em; }
+
+  #keys { top: 300px; flex-direction: row; justify-content: center; gap: 14px; }
+  .key { min-width: 76px; height: 76px; padding: 0 22px; display: grid; place-items: center; border-radius: 16px; background: rgba(255, 255, 255, .78); box-shadow: 0 1px 0 rgba(255,255,255,.9) inset, 0 6px 0 rgba(60, 70, 90, .18), 0 14px 30px rgba(40, 60, 90, .16); font-size: 30px; font-weight: 600; color: #34404c; }
+  .plus { align-self: center; font-size: 28px; color: #7a8794; }
+
+  .glass { position: absolute; left: 280px; width: 720px; border-radius: 18px; overflow: hidden; background: rgba(255, 255, 255, .42); backdrop-filter: blur(28px) saturate(1.7); -webkit-backdrop-filter: blur(28px) saturate(1.7); box-shadow: 0 0 0 .5px rgba(255,255,255,.7) inset, 0 24px 60px rgba(40, 60, 90, .22); }
+  #launcher { top: 150px; }
+  .search { height: 60px; display: flex; align-items: center; gap: 12px; padding: 0 18px; }
+  .search svg { width: 22px; height: 22px; stroke: rgba(42,49,59,.6); stroke-width: 1.7; fill: none; stroke-linecap: round; }
+  .query { font-size: 19px; color: #20262d; display: flex; align-items: center; }
+  .caret { width: 2px; height: 22px; margin-left: 2px; background: #3a4a5a; }
+  .placeholder { color: rgba(42,49,59,.5); }
+  .results { border-top: 1px solid rgba(42,49,59,.09); padding: 6px 8px 8px; }
+  .row { height: 56px; display: flex; align-items: center; gap: 12px; padding: 0 11px; border-radius: 10px; }
+  .row.active { background: rgba(42,49,59,.075); }
+  .row img, .row .doc { width: 30px; height: 30px; flex: 0 0 30px; }
+  .doc { border-radius: 6px; background: linear-gradient(#fff, #eef2f6); box-shadow: 0 0 0 1px rgba(42,49,59,.14) inset; position: relative; }
+  .doc::after { content: "{ }"; position: absolute; inset: 0; display: grid; place-items: center; font: 600 10px Menlo, monospace; color: #7a6aa6; }
+  .copy { flex: 1; display: flex; flex-direction: column; gap: 3px; }
+  .copy strong { font-size: 14px; font-weight: 600; }
+  .copy small, .kind { font-size: 11px; color: rgba(42,49,59,.56); }
+
+  .shot { position: absolute; left: 300px; top: 60px; width: 680px; height: 507px; border-radius: 14px; overflow: hidden; box-shadow: 0 24px 60px rgba(40, 60, 90, .24); }
+  .shot img { position: absolute; left: -27.2px; top: -27.2px; width: 734.4px; }
+  .caption { position: absolute; left: 0; right: 0; top: 604px; display: flex; justify-content: center; }
+  .caption div { padding: 11px 24px; border-radius: 999px; background: rgba(255,255,255,.7); box-shadow: 0 8px 24px rgba(40,60,90,.12); font-size: 20px; color: #33414b; white-space: nowrap; }
+  .caption b { color: #1d6f78; margin-right: 10px; }
+
+  #outro { top: 200px; }
+  #outro img { width: 104px; height: 104px; filter: drop-shadow(0 16px 26px rgba(40, 60, 90, .2)); }
+  #outro h1 { font-size: 44px; margin-top: 20px; }
+  .chips { margin-top: 20px; display: flex; gap: 12px; }
+  .chips span { padding: 8px 18px; border-radius: 999px; background: rgba(255,255,255,.66); font-size: 18px; color: #3d4b57; }
+  .url { margin-top: 26px; font: 500 20px "SF Mono", Menlo, monospace; color: #1d6f78; }
+</style>
+</head>
+<body>
+  <div class="layer" id="bg">
+    <div class="blob" id="b1" style="width:620px;height:620px;background:#ffb58f"></div>
+    <div class="blob" id="b2" style="width:600px;height:600px;background:#93b8ff"></div>
+    <div class="blob" id="b3" style="width:640px;height:640px;background:#c9a2ff"></div>
+    <div class="blob" id="b4" style="width:520px;height:520px;background:#7ed6c3"></div>
+  </div>
+
+  <div class="center" id="intro">
+    <img src="../../src-tauri/icons/128x128@2x.png" alt="">
+    <h1>轻匣<span>QingBox</span></h1>
+    <div class="tagline">键盘优先的 macOS 效率工具</div>
+  </div>
+
+  <div class="center" id="keys"><div class="key" id="k1">⌥</div><div class="plus">+</div><div class="key" id="k2">Space</div></div>
+
+  <div class="glass" id="launcher">
+    <div class="search">
+      <svg viewBox="0 0 24 24"><circle cx="10.5" cy="10.5" r="6.5"/><path d="m15.5 15.5 5 5"/></svg>
+      <div class="query"><span id="typed"></span><span class="caret" id="caret"></span><span class="placeholder" id="ph">搜索插件、应用、文件或目录…</span></div>
+    </div>
+    <div class="results" id="results">
+      <div class="row active" id="r1"><img src="../../plugins/json-tools/public/icon.svg" alt=""><div class="copy"><strong>格式化编辑器</strong><small>JSON / HTML / XML</small></div><span class="kind">插件</span></div>
+      <div class="row" id="r2"><div class="doc"></div><div class="copy"><strong>package.json</strong><small>~/Projects/demo</small></div><span class="kind">文件</span></div>
+      <div class="row" id="r3"><div class="doc"></div><div class="copy"><strong>tsconfig.json</strong><small>~/Projects/demo</small></div><span class="kind">文件</span></div>
+    </div>
+  </div>
+
+  <div class="shot" id="s1"><img src="../images/formatter.png" alt=""></div>
+  <div class="shot" id="s2"><img src="../images/crypto.png" alt=""></div>
+  <div class="shot" id="s3"><img src="../images/qr.png" alt=""></div>
+  <div class="caption" id="c1"><div><b>格式化编辑器</b>粘贴即格式化 JSON / HTML / XML</div></div>
+  <div class="caption" id="c2"><div><b>编码工具</b>编码、哈希、对称与非对称加密</div></div>
+  <div class="caption" id="c3"><div><b>二维码</b>文字生成二维码，粘贴截图即可识别</div></div>
+
+  <div class="center" id="outro">
+    <img src="../../src-tauri/icons/128x128@2x.png" alt="">
+    <h1>轻匣 QingBox</h1>
+    <div class="chips"><span>本地优先</span><span>插件扩展</span><span>MIT 开源</span></div>
+    <div class="url">github.com/ruke318/qingxia</div>
+  </div>
+
+<script>
+  const DURATION = 13;
+  const $ = (id) => document.getElementById(id);
+  const clamp = (v) => Math.min(1, Math.max(0, v));
+  const ease = (v) => 1 - Math.pow(1 - clamp(v), 3);
+  // 在 [a, b] 区间内从 0 过渡到 1
+  const span = (t, a, b) => ease((t - a) / (b - a));
+  // 淡入于 [inA, inB]，淡出于 [outA, outB]
+  const life = (t, inA, inB, outA, outB) => Math.min(span(t, inA, inB), 1 - span(t, outA, outB));
+  function set(el, opacity, y = 0, scale = 1) {
+    el.style.opacity = opacity;
+    el.style.transform = `translateY(${y}px) scale(${scale})`;
+    el.style.visibility = opacity > 0.001 ? "visible" : "hidden";
+  }
+
+  window.renderAt = function (t) {
+    // 背景色块缓慢漂移
+    const blobs = [[80, 60, 1], [760, -40, 1.3], [700, 320, .8], [-60, 380, 1.1]];
+    blobs.forEach(([x, y, k], i) => {
+      const a = (t / DURATION) * Math.PI * 2 * k + i;
+      $(`b${i + 1}`).style.transform = `translate(${x + Math.cos(a) * 40}px, ${y + Math.sin(a) * 30}px)`;
+    });
+
+    // 开场
+    const intro = life(t, 0.1, 0.8, 2.2, 2.6);
+    set($("intro"), intro, (1 - span(t, 0.1, 0.9)) * 20 - span(t, 2.2, 2.6) * 30, 0.94 + 0.06 * span(t, 0.1, 0.9));
+
+    // 键帽：出现、按下、淡出
+    const keys = life(t, 2.45, 2.75, 3.3, 3.55);
+    set($("keys"), keys, (1 - span(t, 2.45, 2.75)) * 16);
+    const press = t > 2.9 && t < 3.08 ? 0.9 : 1;
+    const pressY = t > 2.9 && t < 3.08 ? 5 : 0;
+    ["k1", "k2"].forEach((id) => { $(id).style.transform = `translateY(${pressY}px) scale(${press})`; });
+
+    // 主入口：落下、输入、展开结果，随后淡出
+    const launcher = life(t, 3.05, 3.45, 6.0, 6.35);
+    set($("launcher"), launcher, (1 - span(t, 3.05, 3.5)) * -24);
+    const typed = "json".slice(0, Math.max(0, Math.min(4, Math.floor((t - 3.6) / 0.14) + 1)));
+    $("typed").textContent = t >= 3.6 ? typed : "";
+    $("ph").style.display = typed && t >= 3.6 ? "none" : "";
+    $("caret").style.opacity = Math.floor(t * 2.2) % 2 === 0 || (t > 3.5 && t < 4.3) ? 1 : 0;
+    const open = span(t, 4.3, 4.65);
+    $("results").style.height = `${open * 182}px`;
+    $("results").style.padding = open > 0 ? "" : "0";
+    $("results").style.borderTopColor = open > 0 ? "" : "transparent";
+    ["r1", "r2", "r3"].forEach((id, i) => set($(id), span(t, 4.4 + i * 0.08, 4.7 + i * 0.08), (1 - span(t, 4.4 + i * 0.08, 4.7 + i * 0.08)) * 8));
+
+    // 三个插件截图依次出现，交叉淡化并轻微放大
+    const shots = [[6.0, 7.75], [7.55, 9.3], [9.1, 10.85]];
+    shots.forEach(([a, b], i) => {
+      const o = life(t, a, a + 0.35, b - 0.2, b + 0.15);
+      set($(`s${i + 1}`), o, 0, 0.97 + 0.04 * clamp((t - a) / (b - a)));
+      set($(`c${i + 1}`), life(t, a + 0.15, a + 0.5, b - 0.25, b), (1 - span(t, a + 0.15, a + 0.5)) * 12);
+    });
+
+    // 结尾，最后淡出回到背景，循环播放时首尾衔接
+    const outro = life(t, 10.85, 11.4, 12.55, 12.95);
+    set($("outro"), outro, (1 - span(t, 10.85, 11.5)) * 18, 0.95 + 0.05 * span(t, 10.85, 11.5));
+  };
+  window.DURATION = DURATION;
+
+  // 直接打开页面时按真实时间循环预览；逐帧渲染时由脚本设置 window.__frameMode
+  window.renderAt(0);
+  if (!window.__frameMode) {
+    const start = performance.now();
+    const tick = () => { if (window.__frameMode) return; window.renderAt(((performance.now() - start) / 1000) % DURATION); requestAnimationFrame(tick); };
+    requestAnimationFrame(tick);
+  }
+</script>
+</body>
+</html>

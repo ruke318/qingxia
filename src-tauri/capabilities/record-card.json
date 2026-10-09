@@ -1,0 +1,11 @@
+{
+  "$schema": "../gen/schemas/desktop-schema.json",
+  "identifier": "record-card-capability",
+  "description": "录屏完成卡片只能操作自己的录像，宿主再次校验卡片身份",
+  "webviews": [
+    "record-card-*"
+  ],
+  "permissions": [
+    "allow-record-card-action"
+  ]
+}

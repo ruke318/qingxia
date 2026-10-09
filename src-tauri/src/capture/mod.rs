@@ -2,13 +2,23 @@
 //!
 //! 同一时刻只有一个会话，按下快捷键或在搜索框选“截图”都调用 [`start_screenshot`]。
 //! 每个会话有递增编号，异步回调携带编号推进状态，会话已取消或被新会话取代时，迟到的回调直接丢弃。
+pub mod record;
+pub mod record_engine;
+pub mod record_windows;
+pub mod record_files;
+pub mod record_media;
 pub mod export;
+pub mod long;
+pub mod long_stitch;
 pub mod overlay;
 pub mod permission;
 pub mod pin;
 pub mod screenshot;
 
 use std::sync::Mutex;
+
+/// 截图与录屏的入口共用此锁，避免并发检查后同时占用会话。
+pub(crate) static SESSION_START: Mutex<()> = Mutex::new(());
 
 use tauri::{AppHandle, Manager, Webview};
 
@@ -28,6 +38,8 @@ pub enum Phase {
     Annotating,
     /// 正在复制或保存。
     Exporting,
+    /// 长截图：用户滚动内容，后台截取拼接。
+    Scrolling,
 }
 
 /// 推动会话前进的事件。
@@ -47,6 +59,8 @@ pub enum Event {
     Fail,
     /// 用户取消（Esc）或出现无法继续的情况。
     Cancel,
+    /// 开始长截图。
+    LongStart,
 }
 
 /// 状态转换表；返回 `None` 表示该事件在当前阶段无效，应忽略（例如准备期间重复按快捷键）。
@@ -57,10 +71,11 @@ pub fn transition(phase: Phase, event: Event) -> Option<Phase> {
         (Idle, Start) => Some(Preparing),
         (Preparing, Ready) => Some(Selecting),
         (Selecting, Selected) => Some(Annotating),
-        (Annotating, Export) => Some(Exporting),
+        (Annotating | Scrolling, Export) => Some(Exporting),
+        (Selecting | Annotating, LongStart) => Some(Scrolling),
         (Exporting, Done) => Some(Idle),
         (Exporting, Fail) => Some(Annotating),
-        (Preparing | Selecting | Annotating, Fail) => Some(Idle),
+        (Preparing | Selecting | Annotating | Scrolling, Fail) => Some(Idle),
         (Idle, _) => None,
         (_, Cancel) => Some(Idle),
         _ => None,
@@ -136,11 +151,14 @@ pub fn start_screenshot(app: &AppHandle, hide_panel: bool) -> Result<(), String>
         crate::diag!("截图：系统版本低于 macOS {MINIMUM_MACOS}，不可用");
         return Err(format!("截图需要 macOS {MINIMUM_MACOS} 或更高版本"));
     }
+    let entry = SESSION_START.lock().map_err(|_| "截图与录屏入口不可用")?;
+    if app.state::<record::RecordState>().active() { return Ok(()); }
     let state = app.state::<CaptureState>();
     let Some(id) = state.begin()? else {
         crate::diag!("截图：已有会话进行中，忽略本次触发");
         return Ok(());
     };
+    drop(entry);
     crate::diag!("截图：会话 {id} 开始");
     // 未授权时结束会话，唤起主面板说明原因。
     let access = match permission::ensure(app) {
@@ -194,6 +212,7 @@ fn present(app: &AppHandle, id: u64, result: Result<Vec<screenshot::Snapshot>, S
 /// 结束指定会话并关闭覆盖窗；会话已结束或已被新会话取代时什么也不做。
 fn finish(app: &AppHandle, id: u64, event: Event, reason: &str) -> Result<(), String> {
     if !app.state::<CaptureState>().advance(id, event)? { return Ok(()) }
+    long::shutdown(app);
     overlay::close_all(app);
     screenshot::clear();
     // 保存对话框会激活应用；结束后把焦点交还给原来的应用（有贴图时保留应用，避免贴图一起隐藏）
@@ -273,6 +292,16 @@ mod tests {
         for phase in [Preparing, Selecting, Annotating] {
             assert_eq!(transition(phase, Fail), Some(Idle));
         }
+    }
+
+    #[test]
+    fn 长截图从选区或标注开始可导出或取消() {
+        assert_eq!(transition(Selecting, LongStart), Some(Scrolling));
+        assert_eq!(transition(Annotating, LongStart), Some(Scrolling));
+        assert_eq!(transition(Preparing, LongStart), None);
+        assert_eq!(transition(Scrolling, Export), Some(Exporting));
+        assert_eq!(transition(Scrolling, Cancel), Some(Idle));
+        assert_eq!(transition(Scrolling, Fail), Some(Idle));
     }
 
     #[test]

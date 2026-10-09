@@ -1,0 +1,67 @@
+/* 录屏界面：与截图工具栏统一的浅色悬浮条、图标按钮；红色只用于开始与停止 */
+.record-selector, .record-control, .record-card { color: #262b31; font-size: 13px; font-family: "SF Pro Text", "PingFang SC", -apple-system, sans-serif; }
+.record-selector button, .record-control button, .record-card button { display: inline-flex; align-items: center; justify-content: center; gap: 5px; height: 30px; padding: 0 9px; border: 0; border-radius: 7px; color: inherit; background: transparent; font: inherit; white-space: nowrap; cursor: pointer; }
+.record-selector button:hover:not(:disabled), .record-control button:hover:not(:disabled), .record-card button:hover:not(:disabled) { background: rgba(42, 49, 59, .08); }
+.record-selector button:disabled, .record-control button:disabled, .record-card button:disabled { cursor: default; opacity: .45; }
+.record-selector button:focus-visible, .record-control button:focus-visible, .record-card button:focus-visible { outline: 2px solid rgba(63, 127, 99, .55); outline-offset: 1px; }
+.record-selector svg, .record-card svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; flex-shrink: 0; }
+.record-separator { width: 1px; height: 18px; margin: 0 3px; background: rgba(42, 49, 59, .15); }
+
+/* 选区 */
+.record-snapshot { position: fixed; inset: 0; width: 100%; height: 100%; pointer-events: none; }
+.record-overlay { position: fixed; inset: 0; background: rgba(0, 0, 0, .28); cursor: crosshair; }
+.record-overlay.has-selection { background: transparent; }
+.record-selection, .record-hover { position: absolute; box-sizing: border-box; border: 2px solid #e8565b; border-radius: 6px; box-shadow: 0 0 0 10000px rgba(0, 0, 0, .28); }
+.record-selection { cursor: move; }
+.record-hover { pointer-events: none; background: rgba(232, 86, 91, .06); }
+.record-size { position: absolute; left: 0; bottom: calc(100% + 6px); padding: 4px 8px; border-radius: 4px; color: #fff; background: rgba(0, 0, 0, .7); font-size: 12px; white-space: nowrap; pointer-events: none; }
+.record-handle { position: absolute; width: 10px; height: 10px; border: 1px solid #e8565b; box-sizing: border-box; background: #fff; transform: translate(-50%, -50%); }
+.record-handle-nw { left: 0; top: 0; cursor: nwse-resize; }
+.record-handle-n { left: 50%; top: 0; cursor: ns-resize; }
+.record-handle-ne { left: 100%; top: 0; cursor: nesw-resize; }
+.record-handle-e { left: 100%; top: 50%; cursor: ew-resize; }
+.record-handle-se { left: 100%; top: 100%; cursor: nwse-resize; }
+.record-handle-s { left: 50%; top: 100%; cursor: ns-resize; }
+.record-handle-sw { left: 0; top: 100%; cursor: nesw-resize; }
+.record-handle-w { left: 0; top: 50%; cursor: ew-resize; }
+
+/* 选区下方的录屏工具栏 */
+.record-toolbar { position: absolute; z-index: 4; display: flex; align-items: center; gap: 2px; height: 38px; padding: 0 4px; box-sizing: border-box; border-radius: 9px; background: rgba(250, 251, 250, .96); box-shadow: 0 6px 24px rgba(0, 0, 0, .28), 0 0 0 .5px rgba(0, 0, 0, .12); cursor: default; }
+.record-toolbar button[aria-pressed="true"] { color: #2f6a50; background: rgba(63, 127, 99, .16); }
+.record-toolbar button[aria-pressed="true"]:hover:not(:disabled) { background: rgba(63, 127, 99, .22); }
+.record-toolbar button.record-start { margin-left: 2px; padding: 0 11px; color: #fff; background: #d84449; font-weight: 500; }
+.record-toolbar button.record-start:hover:not(:disabled) { background: #bc3439; }
+.record-dot { width: 9px; height: 9px; border-radius: 50%; background: currentColor; }
+.record-error { margin: 0; padding: 6px 10px; border-radius: 6px; color: #fff; background: rgba(184, 58, 58, .95); font-size: 12px; line-height: 1.5; overflow-wrap: anywhere; }
+.record-toolbar .record-error { position: absolute; top: calc(100% + 6px); right: 0; max-width: 420px; }
+
+/* 录制中的控制条：小胶囊 */
+.record-control { box-sizing: border-box; height: 100vh; display: flex; align-items: center; gap: 10px; padding: 0 6px 0 14px; border-radius: 22px; background: rgba(250, 251, 250, .97); box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .14); overflow: hidden; }
+.record-indicator { flex-shrink: 0; width: 9px; height: 9px; border-radius: 50%; background: #d84449; animation: record-pulse 1.4s ease-in-out infinite; }
+@keyframes record-pulse { 50% { opacity: .35; } }
+.record-control time { flex-shrink: 0; font-size: 14px; font-weight: 600; font-variant-numeric: tabular-nums; }
+.record-control-state { flex: 1; min-width: 0; overflow: hidden; color: #737b83; font-size: 12px; white-space: nowrap; text-overflow: ellipsis; }
+.record-control-state.error { color: #b83a3a; }
+.record-control button.record-stop { flex-shrink: 0; height: 32px; padding: 0 12px; border-radius: 16px; color: #fff; background: #d84449; font-weight: 500; }
+.record-control button.record-stop:hover:not(:disabled) { background: #bc3439; }
+.record-stop-icon { width: 9px; height: 9px; border-radius: 2px; background: currentColor; }
+
+/* 录屏边框 */
+.record-border { position: fixed; inset: 0; box-sizing: border-box; border: 2px solid #e8565b; border-radius: 4px; pointer-events: none; }
+
+/* 录完的操作卡片 */
+.record-card { box-sizing: border-box; height: 100vh; display: flex; align-items: center; gap: 12px; padding: 12px; border-radius: 12px; background: rgba(250, 251, 250, .98); box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .14); overflow: hidden; }
+.record-card-thumb { flex: 0 0 auto; width: 120px; height: 76px; border-radius: 6px; background: #15181b; object-fit: cover; }
+.record-card-body { flex: 1; min-width: 0; display: flex; flex-direction: column; gap: 2px; }
+.record-card-heading { display: flex; align-items: center; justify-content: space-between; gap: 6px; }
+.record-card-heading strong { font-size: 13px; font-weight: 600; }
+.record-card button.record-card-close { width: 22px; height: 22px; padding: 0; border-radius: 11px; color: #737b83; font-size: 15px; }
+.record-card-name { margin: 0; overflow: hidden; color: #5f6870; font-size: 11px; white-space: nowrap; text-overflow: ellipsis; }
+.record-card-meta { margin: 0; color: #8d969f; font-size: 11px; }
+.record-card-warning { margin: 2px 0 0; color: #8a6a2e; font-size: 11px; line-height: 1.4; overflow-wrap: anywhere; }
+.record-card .record-error { margin-top: 2px; padding: 3px 7px; font-size: 11px; }
+.record-card-actions { display: flex; gap: 2px; margin-top: 6px; }
+.record-card-actions button { height: 26px; padding: 0 7px; border-radius: 6px; background: rgba(42, 49, 59, .06); font-size: 12px; }
+.record-card-actions svg { width: 14px; height: 14px; }
+.record-card button.record-card-delete { color: #b83a3a; }
+.record-floating-error { position: absolute; top: 64px; left: 50%; z-index: 4; transform: translateX(-50%); }

@@ -205,7 +205,7 @@ fn settle_later(window: &Window) {
         let _ = on_main_thread(&target, |target, native, main_thread| {
             if !native.isVisible() || native.isKeyWindow() || settling() { return }
             // 截图覆盖窗持有焦点时不抢回
-            if target.app_handle().state::<crate::capture::CaptureState>().active() { return }
+            if target.app_handle().state::<crate::capture::CaptureState>().active() || target.app_handle().state::<crate::capture::record::RecordState>().active() { return }
             native.makeKeyAndOrderFront(None);
             let key = native.isKeyWindow();
             let active = NSApplication::sharedApplication(main_thread).isActive();
@@ -376,9 +376,14 @@ pub fn present(window: &Window, height: f64, event: &'static str, notice: Option
     })
 }
 
+struct CaptureVisibility { protect_panel_on_blur: bool, protect_application: bool }
+fn capture_visibility(screenshot_active: bool, recording_active: bool) -> CaptureVisibility {
+    CaptureVisibility { protect_panel_on_blur: screenshot_active, protect_application: recording_active }
+}
+
 pub fn hide_if_unfocused(window: &Window) -> Result<(), String> {
     // 截图期间覆盖窗取得焦点，主面板保持原样，截图结束后用户可以继续使用
-    if window.app_handle().state::<crate::capture::CaptureState>().active() { return Ok(()) }
+    if capture_visibility(window.app_handle().state::<crate::capture::CaptureState>().active(), window.app_handle().state::<crate::capture::record::RecordState>().active()).protect_panel_on_blur { return Ok(()) }
     on_main_thread(window, |target, native, main_thread| {
         // 过渡期内的失焦多为系统在应用间来回切换激活，不收起，重新取得键盘焦点。
         if settling() && native.isVisible() {
@@ -407,7 +412,7 @@ fn hide_now(target: &Window, native: &NSPanel, main_thread: MainThreadMarker, re
     crate::plugins::hide_active(target.app_handle());
     let _ = target.hide();
     // 有贴图时不隐藏应用，否则贴图会一起消失
-    if visible && crate::capture::pin::count() == 0 {
+    if visible && crate::capture::pin::count() == 0 && !capture_visibility(false, target.app_handle().state::<crate::capture::record::RecordState>().active()).protect_application {
         hide_application(main_thread);
     }
 }
@@ -423,15 +428,15 @@ pub fn release_focus(app: &tauri::AppHandle) {
         return;
     }
     if let Some(main_thread) = MainThreadMarker::new() {
-        if crate::capture::pin::count() == 0 { hide_application(main_thread) }
+        if crate::capture::pin::count() == 0 && !capture_visibility(false, app.state::<crate::capture::record::RecordState>().active()).protect_application { hide_application(main_thread) }
     }
 }
 
 /// 面板已由调用方收起，再隐藏应用以交还焦点。
 pub fn hide_app(window: &Window) -> Result<(), String> {
-    on_main_thread(window, |_, _, main_thread| {
+    on_main_thread(window, |target, _, main_thread| {
         // 有贴图时不隐藏应用，否则贴图会一起消失
-        if crate::capture::pin::count() == 0 { hide_application(main_thread) }
+        if crate::capture::pin::count() == 0 && !capture_visibility(false, target.app_handle().state::<crate::capture::record::RecordState>().active()).protect_application { hide_application(main_thread) }
     })
 }
 
@@ -521,6 +526,16 @@ pub fn frontmost_app() -> String {
 #[cfg(test)]
 mod tests {
     use super::*;
+
+    #[test]
+    fn 最终回归_截图保护主面板但录屏及预览允许失焦收起() {
+        assert!(capture_visibility(true, false).protect_panel_on_blur);
+        assert!(capture_visibility(true, true).protect_panel_on_blur);
+        let recording = capture_visibility(false, true);
+        assert!(!recording.protect_panel_on_blur, "录屏/预览不能阻止主面板及插件自身失焦收起");
+        assert!(recording.protect_application, "不隐藏整个应用，录屏控制条仍然显示");
+        let idle = capture_visibility(false, false); assert!(!idle.protect_panel_on_blur && !idle.protect_application);
+    }
 
     #[test]
     fn 全屏快捷键解析修饰键与按键() {

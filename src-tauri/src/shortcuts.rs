@@ -24,6 +24,9 @@ pub const LAUNCHER: &str = "launcher";
 pub const FULLSCREEN: &str = "fullscreen";
 /// 截图，注册为系统全局快捷键；可以清除。
 pub const SCREENSHOT: &str = "screenshot";
+/// 录屏，注册为系统全局快捷键；可以清除。
+pub const SCREEN_RECORD: &str = "recording";
+const INITIAL_RECORDING: &str = "Alt+Shift+R";
 const DEFAULT_LAUNCHER: &str = "Alt+Space";
 const DEFAULT_FULLSCREEN: &str = "Control+Super+F";
 /// 截图快捷键只在首次初始化时写入，之后用户修改或清除都不会被重置。
@@ -113,7 +116,7 @@ fn find_holder(active: &BTreeMap<String, Shortcut>, shortcut: &Shortcut, except:
 
 /// 宿主内置项（唤起、全屏、截图），其余为插件命令。
 fn is_builtin(id: &str) -> bool {
-    matches!(id, LAUNCHER | FULLSCREEN | SCREENSHOT)
+    matches!(id, LAUNCHER | FULLSCREEN | SCREENSHOT | SCREEN_RECORD)
 }
 
 fn setting_key(id: &str) -> String {
@@ -121,6 +124,7 @@ fn setting_key(id: &str) -> String {
         LAUNCHER => "launcher_shortcut".into(),
         FULLSCREEN => "fullscreen_shortcut".into(),
         SCREENSHOT => "screenshot_shortcut".into(),
+        SCREEN_RECORD => "recording_shortcut".into(),
         command => format!("plugin_shortcut:{command}"),
     }
 }
@@ -177,6 +181,7 @@ fn label(app: &AppHandle, id: &str) -> String {
         LAUNCHER => "唤起轻匣".into(),
         FULLSCREEN => "插件全屏".into(),
         SCREENSHOT => "截图".into(),
+        SCREEN_RECORD => "录屏".into(),
         command => crate::plugins::command_label(app, command).unwrap_or_else(|| command.to_string()),
     }
 }
@@ -214,6 +219,8 @@ fn register_global(app: &AppHandle, id: &str, shortcut: Shortcut) -> Result<(), 
             }
             if owner == LAUNCHER {
                 crate::show_launcher(app);
+            } else if owner == SCREEN_RECORD {
+                if let Err(error) = crate::capture::record::shortcut(app) { crate::diag!("录屏未开始：{error}"); }
             } else if owner == SCREENSHOT {
                 if let Err(error) = crate::capture::start_screenshot(app, false) { crate::diag!("截图未开始：{error}"); }
             } else {
@@ -338,7 +345,8 @@ pub fn initialize(app: &AppHandle) -> Result<(), String> {
     seed_screenshot(app)?;
     restore_locked(app, LAUNCHER)?;
     restore_locked(app, FULLSCREEN)?;
-    restore_locked(app, SCREENSHOT)
+    restore_locked(app, SCREENSHOT)?;
+    restore_locked(app, SCREEN_RECORD)
 }
 
 /// 首次初始化时写入截图快捷键，以后不再写入（同剪贴板 ⌥⇧V 的做法）。
@@ -354,7 +362,11 @@ fn seed_screenshot(app: &AppHandle) -> Result<(), String> {
             .execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?1, ?2)", params![setting_key(SCREENSHOT), INITIAL_SCREENSHOT])
             .map_err(|_| "初始化截图快捷键失败")?;
     }
-    transaction.commit().map_err(|_| "初始化截图快捷键失败".into())
+    let first_recording = transaction.execute("INSERT OR IGNORE INTO settings(key, value) VALUES('recording:initialized', 'true')", []).map_err(|_| "初始化录屏快捷键失败")?;
+    if first_recording > 0 {
+        transaction.execute("INSERT OR IGNORE INTO settings(key, value) VALUES(?1, ?2)", params![setting_key(SCREEN_RECORD), INITIAL_RECORDING]).map_err(|_| "初始化录屏快捷键失败")?;
+    }
+    transaction.commit().map_err(|_| "初始化快捷键失败".into())
 }
 
 /// 插件重载前撤销全部插件命令的快捷键并清空其错误；中途失败时恢复已撤销的项。调用方须持有更新锁。
@@ -403,6 +415,7 @@ fn rows(app: &AppHandle) -> Result<Vec<ShortcutRow>, String> {
         row(app, LAUNCHER, "轻匣", "唤起轻匣", None, true)?,
         row(app, FULLSCREEN, "轻匣", "插件全屏", None, true)?,
         row(app, SCREENSHOT, "轻匣", "截图", Some(INITIAL_SCREENSHOT.into()), true)?,
+        row(app, SCREEN_RECORD, "轻匣", "录屏", Some(INITIAL_RECORDING.into()), true)?,
     ];
     for command in crate::plugins::management::installed_commands(app)? {
         rows.push(row(app, &command.id, &command.plugin_name, &command.title, command.suggested, command.enabled)?);

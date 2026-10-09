@@ -1,0 +1,11 @@
+# Automatically generated - DO NOT EDIT!
+
+[[permission]]
+identifier = "allow-capture-long-export"
+description = "Enables the capture_long_export command without any pre-configured scope."
+commands.allow = ["capture_long_export"]
+
+[[permission]]
+identifier = "deny-capture-long-export"
+description = "Denies the capture_long_export command without any pre-configured scope."
+commands.deny = ["capture_long_export"]

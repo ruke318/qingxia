@@ -1,0 +1,11 @@
+# 由构建脚本自动生成，请勿手动修改。
+
+[[permission]]
+identifier = "allow-record-stop"
+description = "允许调用 record_stop 命令，窗口与会话范围由宿主校验。"
+commands.allow = ["record_stop"]
+
+[[permission]]
+identifier = "deny-record-stop"
+description = "禁止调用 record_stop 命令。"
+commands.deny = ["record_stop"]

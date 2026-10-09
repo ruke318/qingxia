@@ -1,0 +1,93 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>长截图面板回归检查</title></head>
+<body><div id="root" style="width:270px;height:548px"></div><script type="module">
+  // 模拟宿主命令与事件，面板使用实际组件
+  const calls = [], callbacks = new Map(), listeners = new Map();
+  let nextId = 1, root, failure = null, saveResult = true;
+  globalThis.isTauri = true;
+  window.__TAURI_EVENT_PLUGIN_INTERNALS__ = { unregisterListener: (_, id) => listeners.delete(id) };
+  window.__TAURI_INTERNALS__ = {
+    transformCallback(callback) { const id = nextId++; callbacks.set(id, callback); return id; },
+    invoke(command, args) {
+      calls.push({ command, args });
+      if (command === "plugin:event|listen") { listeners.set(args.handler, args); return Promise.resolve(args.handler); }
+      if (command === "plugin:event|unlisten") return Promise.resolve(null);
+      if (failure && command === failure.command) return Promise.reject(failure.message);
+      if (command === "capture_long_finish") return Promise.resolve({ width: 800, height: 5400, url: "data:image/png;base64," + tiny });
+      if (command === "capture_long_export") return Promise.resolve(saveResult);
+      return Promise.resolve(null);
+    },
+  };
+  const tinyCanvas = Object.assign(document.createElement("canvas"), { width: 4, height: 20 });
+  tinyCanvas.getContext("2d").fillRect(0, 0, 4, 20);
+  const tiny = tinyCanvas.toDataURL("image/png").split(",")[1];
+  const React = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { LongShotPanel } = await import("../src/capture/LongShotPanel.tsx");
+  await import("../src/capture/capture.css");
+  const pause = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
+  const assert = (value, message) => { if (!value) throw new Error(message); };
+  const named = (label) => document.querySelector(`[aria-label="${label}"]`);
+  const commandCalls = (command) => calls.filter((call) => call.command === command);
+  const emit = (payload) => [...listeners.keys()].forEach((id) => callbacks.get(id)({ event: "long-progress", id: 0, payload }));
+  async function mount() {
+    root?.unmount(); listeners.clear(); root = createRoot(document.getElementById("root"));
+    root.render(React.createElement(React.StrictMode, null, React.createElement(LongShotPanel, { session: 7 })));
+    await pause(); calls.length = 0;
+  }
+  async function click(label) { assert(named(label), `缺少操作：${label}`); named(label).click(); await pause(); }
+  const text = () => document.body.textContent;
+  const key = (init) => window.dispatchEvent(new KeyboardEvent("keydown", { bubbles: true, cancelable: true, ...init }));
+  const scenarios = [
+    ["开始时提示滚动，没有内容不能复制或保存", async () => {
+      assert(text().includes("上下滚动") && named("复制长截图").disabled && named("保存长截图").disabled, "还没拼接时不能复制或保存");
+      assert(!named("取消长截图").disabled, "随时可以取消");
+    }],
+    ["显示实时预览，滚动太快和达到上限时提示", async () => {
+      emit({ height: 2400, thumbnail: "data:image/png;base64," + tiny, state: "scrolling", message: null }); await pause();
+      assert(document.querySelector('[alt="长截图拼接进度"]') && !named("复制长截图").disabled, "应显示预览并可复制");
+      emit({ height: 2400, thumbnail: null, state: "lost", message: null }); await pause();
+      assert(text().includes("滚动太快") && document.querySelector('[alt="长截图拼接进度"]'), "滚动太快时提示并保留预览");
+      emit({ height: 20000, thumbnail: null, state: "limited", message: null }); await pause();
+      assert(text().includes("最大高度"), "达到上限时提示");
+    }],
+    ["点复制一步完成：先合成再复制", async () => {
+      emit({ height: 2400, thumbnail: null, state: "scrolling", message: null }); await pause();
+      await click("复制长截图"); await pause();
+      assert(commandCalls("capture_long_finish").length === 1 && commandCalls("capture_long_export")[0]?.args.action === "copy", "应先合成再复制");
+    }],
+    ["保存取消后再复制不重复合成，并显示整图", async () => {
+      emit({ height: 2400, thumbnail: null, state: "scrolling", message: null }); await pause();
+      saveResult = false; await click("保存长截图"); await pause();
+      assert(commandCalls("capture_long_export")[0]?.args.action === "save" && document.querySelector('[alt="长截图预览"]'), "保存应调用 save 并显示整图");
+      saveResult = true; await click("复制长截图"); await pause();
+      assert(commandCalls("capture_long_finish").length === 1 && commandCalls("capture_long_export")[1]?.args.action === "copy", "已合成时不再合成");
+    }],
+    ["回车复制、⌘S 保存", async () => {
+      emit({ height: 2400, thumbnail: null, state: "scrolling", message: null }); await pause();
+      saveResult = false; key({ key: "s", metaKey: true }); await pause(40);
+      assert(commandCalls("capture_long_export")[0]?.args.action === "save", "⌘S 应保存");
+      key({ key: "Enter" }); await pause(40);
+      assert(commandCalls("capture_long_export")[1]?.args.action === "copy", "回车应复制");
+    }],
+    ["操作失败显示原因并可重试", async () => {
+      emit({ height: 2400, thumbnail: null, state: "scrolling", message: null }); await pause();
+      failure = { command: "capture_long_finish", message: "还没有截到画面" }; await click("复制长截图");
+      assert(text().includes("还没有截到画面") && !named("复制长截图").disabled, "失败后可重试");
+    }],
+    ["取消按钮与 Esc 都会取消", async () => {
+      await click("取消长截图"); assert(commandCalls("capture_long_cancel").length === 1, "取消按钮应取消");
+      key({ key: "Escape" }); await pause();
+      assert(commandCalls("capture_long_cancel").length === 2, "Esc 应取消");
+    }],
+  ];
+  const failures = [];
+  for (const [scenario, test] of scenarios) {
+    try { failure = null; saveResult = true; await mount(); await test(); }
+    catch (error) { failures.push({ scenario, message: String(error) }); }
+  }
+  root?.unmount();
+  const result = document.createElement("pre"); result.id = "result";
+  result.textContent = JSON.stringify({ total: scenarios.length, passed: scenarios.length - failures.length, failures }); document.body.append(result);
+</script></body></html>

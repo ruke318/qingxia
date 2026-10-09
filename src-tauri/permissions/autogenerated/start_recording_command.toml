@@ -1,0 +1,11 @@
+# 由构建脚本自动生成，请勿手动修改。
+
+[[permission]]
+identifier = "allow-start-recording-command"
+description = "允许调用 start_recording_command 命令，窗口与会话范围由宿主校验。"
+commands.allow = ["start_recording_command"]
+
+[[permission]]
+identifier = "deny-start-recording-command"
+description = "禁止调用 start_recording_command 命令。"
+commands.deny = ["start_recording_command"]

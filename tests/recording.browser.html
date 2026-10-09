@@ -1,0 +1,169 @@
+<!doctype html>
+<html lang="zh-CN">
+<head><meta charset="UTF-8"><link rel="icon" href="data:,"><title>录屏页面回归检查</title></head>
+<body><div id="root"></div><script type="module">
+  // 只替换原生命令传输，所有交互使用实际组件。
+  const calls = [];
+  let root, pendingStart, failure = null;
+  const base = { phase: "recording", elapsed: 65, duration: 65, fileSize: 4096, error: null };
+  let status = { ...base };
+  // 窗口列表从前到后：小窗口叠在大窗口上
+  const context = { role: "select", session: 24, display: 3, scale: 2, image: null, windows: [
+    { id: 702, name: "前面的小窗口", x: 150, y: 140, width: 200, height: 120 },
+    { id: 701, name: "后面的大窗口", x: 100, y: 120, width: 400, height: 300 },
+  ] };
+  const card = { role: "card", session: 5, name: "轻匣录屏 2026-10-09 10.00.00.000.mp4", path: "/Users/test/Movies/轻匣录屏 2026-10-09 10.00.00.000.mp4", duration: 75, size: 3 * 1024 * 1024, warning: null, video: "" };
+  window.__QINGBOX_RECORD__ = context;
+  localStorage.removeItem("qingbox.record.options");
+  window.__TAURI_INTERNALS__ = {
+    transformCallback() { return 0; },
+    invoke(command, args) {
+      calls.push({ command, args });
+      if (command === "record_status") return Promise.resolve({ ...status });
+      if (failure && command === failure.command) return Promise.reject(failure.message);
+      if (command === "record_start" && pendingStart) return pendingStart;
+      return Promise.resolve(null);
+    },
+  };
+  const React = await import("react");
+  const { createRoot } = await import("react-dom/client");
+  const { RecordSelector } = await import("../src/capture/RecordSelector.tsx");
+  const { RecordControl } = await import("../src/capture/RecordControl.tsx");
+  const { RecordCard } = await import("../src/capture/RecordCard.tsx");
+  const { loadRecordPreferences } = await import("../src/capture/recording.ts");
+  await import("../src/capture/capture.css");
+  await import("../src/capture/record.css");
+  const pause = (ms = 20) => new Promise((resolve) => setTimeout(resolve, ms));
+  const assert = (value, message) => { if (!value) throw new Error(message); };
+  const named = (label) => document.querySelector(`[aria-label="${label}"]`);
+  const commandCalls = (command) => calls.filter((call) => call.command === command);
+  async function mount(component = RecordSelector, props = context) {
+    root?.unmount(); root = createRoot(document.getElementById("root"));
+    root.render(React.createElement(React.StrictMode, null, React.createElement(component, { context: props })));
+    await pause(); calls.length = 0;
+  }
+  async function click(label) { assert(named(label), `缺少操作：${label}`); named(label).click(); await pause(); }
+  async function drag(element, from, to) {
+    element.dispatchEvent(new MouseEvent("mousedown", { clientX: from[0], clientY: from[1], button: 0, buttons: 1, bubbles: true, cancelable: true }));
+    window.dispatchEvent(new MouseEvent("mousemove", { clientX: to[0], clientY: to[1], buttons: 1, bubbles: true }));
+    window.dispatchEvent(new MouseEvent("mouseup", { clientX: to[0], clientY: to[1], button: 0, bubbles: true })); await pause();
+  }
+  const layer = () => named("录屏框选层");
+  function expectRect(x, y, width, height) {
+    const rect = named("录屏选区").getBoundingClientRect();
+    assert([rect.x, rect.y, rect.width, rect.height].every((v, i) => Math.abs(v - [x, y, width, height][i]) < 1), `录屏选区位置或尺寸错误：${rect.x},${rect.y},${rect.width},${rect.height}`);
+  }
+  const started = () => commandCalls("record_start")[0]?.args;
+  const pressed = (label) => named(label)?.getAttribute("aria-pressed") === "true";
+  const scenarios = [
+    ["选区前不显示工具栏，选中后出现；默认静音、点击高亮开启，选项记住上次的选择", async () => {
+      assert(!named("录屏操作"), "还没有选区时不显示工具栏");
+      await drag(layer(), [900, 700], [900, 700]);
+      assert(!pressed("系统声音") && !pressed("麦克风") && pressed("点击高亮"), "首次默认选项错误");
+      await click("系统声音"); await click("点击高亮"); await mount(); await drag(layer(), [900, 700], [900, 700]);
+      assert(pressed("系统声音") && !pressed("点击高亮"), "重新录屏应沿用上次选项");
+      assert(loadRecordPreferences({ getItem: () => "{不是 JSON" }).systemAudio === false, "数据损坏时回到默认的静音");
+    }],
+    ["拖动框选按逻辑点提交，尺寸显示实际像素", async () => {
+      await drag(layer(), [300, 280], [50, 60]);
+      assert(named("录屏选区尺寸").textContent === "500 × 440", "尺寸应按 2 倍缩放显示像素");
+      await click("开始录制");
+      assert(JSON.stringify(started().target) === JSON.stringify({ kind: "region", display: 3, rect: { x: 50, y: 60, width: 250, height: 220 } }), "框选应提交本屏逻辑点区域");
+    }],
+    ["未框选时高亮鼠标下最上层的窗口，空白处高亮整屏", async () => {
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 200, clientY: 180, bubbles: true })); await pause();
+      let box = named("录屏窗口高亮").getBoundingClientRect();
+      assert(box.x === 150 && box.width === 200, "应高亮叠在前面的小窗口");
+      window.dispatchEvent(new MouseEvent("mousemove", { clientX: 900, clientY: 700, bubbles: true })); await pause();
+      box = named("录屏窗口高亮").getBoundingClientRect();
+      assert(box.width === innerWidth && box.height === innerHeight, "空白处应高亮整屏");
+    }],
+    ["单击窗口默认录该区域，勾选只录这个窗口后按窗口录", async () => {
+      await drag(layer(), [450, 400], [451, 400]); expectRect(100, 120, 400, 300);
+      assert(named("只录这个窗口") && !pressed("只录这个窗口"), "选中窗口后出现“只录这个窗口”，默认不开启");
+      assert(document.body.textContent.includes("录制“后面的大窗口”所在区域"), "提示应说明录制窗口所在区域");
+      await click("开始录制");
+      assert(started().target.kind === "region" && !("window" in started().target), "默认按窗口所在区域录制");
+      await mount(); await drag(layer(), [450, 400], [450, 400]); await click("只录这个窗口"); await click("开始录制");
+      const target = started().target;
+      assert(target.kind === "window" && target.window === 701 && target.display === 3, "勾选后按真实窗口编号录制");
+      assert(!("windowOnly" in started().options), "“只录这个窗口”不属于原生录制选项");
+    }],
+    ["单击空白处录整屏", async () => {
+      await drag(layer(), [900, 700], [900, 700]); expectRect(0, 0, innerWidth, innerHeight);
+      assert(!named("只录这个窗口"), "整屏不显示“只录这个窗口”");
+      await click("开始录制"); const target = started().target;
+      assert(target.kind === "display" && target.rect.width === innerWidth && target.rect.height === innerHeight, "整屏目标错误");
+    }],
+    ["移动或调整窗口选区后改为自由区域", async () => {
+      await drag(layer(), [450, 400], [450, 400]); await click("只录这个窗口");
+      await drag(named("调整录屏选区：右下角"), [500, 420], [520, 440]);
+      assert(!named("只录这个窗口"), "调整后不再是窗口选区");
+      await click("开始录制"); assert(started().target.kind === "region", "调整后应按区域录制");
+    }],
+    ["区域可移动及拉伸且限制在屏幕内", async () => {
+      await drag(layer(), [50, 60], [250, 200]); await drag(named("录屏选区"), [100, 100], [150, 160]); expectRect(100, 120, 200, 140);
+      await drag(named("调整录屏选区：右下角"), [300, 260], [400, 360]); expectRect(100, 120, 300, 240);
+      await drag(named("录屏选区"), [150, 150], [-500, -500]); expectRect(0, 0, 300, 240);
+      assert(document.querySelectorAll('[aria-label^="调整录屏选区："]').length === 8, "应提供八个调整手柄");
+    }],
+    ["开始请求未完成时禁止重复提交", async () => {
+      let resolve; pendingStart = new Promise((done) => { resolve = done; }); await drag(layer(), [900, 700], [900, 700]);
+      named("开始录制").click(); named("开始录制").click(); await pause();
+      assert(commandCalls("record_start").length === 1 && named("开始录制").disabled, "开始录制应防重复"); resolve(); pendingStart = null;
+    }],
+    ["开始失败显示原因并可重试", async () => {
+      failure = { command: "record_start", message: "没有屏幕录制权限" }; await drag(layer(), [900, 700], [900, 700]); await click("开始录制");
+      assert(document.body.textContent.includes("没有屏幕录制权限") && !named("开始录制").disabled, "开始失败应保留选择并恢复操作");
+    }],
+    ["原生异步启动失败回到选择时可关闭麦克风重试", async () => {
+      status = { ...base, phase: "selecting" }; await mount(); await drag(layer(), [900, 700], [900, 700]); await click("麦克风"); await click("开始录制");
+      status = { ...base, phase: "selecting", error: "麦克风未授权，可关闭麦克风后继续录屏" }; await pause(560);
+      assert(document.body.textContent.includes("麦克风未授权") && !named("开始录制").disabled && !named("麦克风").disabled && pressed("麦克风"), "原生异步失败应恢复选区操作");
+      await click("麦克风"); await click("开始录制");
+      assert(commandCalls("record_start").length === 2 && !commandCalls("record_start")[1].args.options.microphone, "关闭麦克风后应可重试");
+    }],
+    ["取消选区带当前会话编号", async () => { await drag(layer(), [900, 700], [900, 700]); await click("取消录屏"); assert(commandCalls("record_cancel")[0].args.session === 24, "取消会话编号错误"); }],
+    ["计时以宿主状态为准且失焦不停止", async () => {
+      await mount(RecordControl); assert(document.body.textContent.includes("01:05"), "应显示宿主实际录制计时"); window.dispatchEvent(new Event("blur")); await pause();
+      assert(commandCalls("record_stop").length === 0, "失焦不应结束录制");
+    }],
+    ["正常收尾禁用停止直到真实文件完成", async () => {
+      status.phase = "finalizing"; await mount(RecordControl);
+      assert(named("停止录制").disabled && document.body.textContent.includes("完成中"), "正常收尾不应重复停止");
+    }],
+    ["收尾出错显示原因并允许重试结束", async () => {
+      status = { ...base, phase: "finalizing", error: "停止请求失败" }; await mount(RecordControl); await click("重试结束");
+      assert(document.body.textContent.includes("停止请求失败") && commandCalls("record_stop")[0].args.session === 24, "重试必须通过幂等停止命令");
+    }],
+    ["停止命令失败后保留重试操作", async () => {
+      failure = { command: "record_stop", message: "流仍在收尾" }; await mount(RecordControl); await click("停止录制");
+      assert(document.body.textContent.includes("流仍在收尾") && !named("重试结束").disabled, "停止失败应允许重试");
+    }],
+    ["卡片显示文件名、时长与大小，各按钮调用对应操作", async () => {
+      await mount(RecordCard, card);
+      assert(document.body.textContent.includes(card.name) && document.body.textContent.includes("01:15") && document.body.textContent.includes("3.0 MB"), "卡片应显示文件名、时长与大小");
+      for (const [label, action] of [["播放", "play"], ["复制", "copy"], ["访达", "reveal"], ["删除", "delete"], ["关闭", "close"]]) {
+        await mount(RecordCard, card); await click(label);
+        assert(commandCalls("record_card_action")[0]?.args.action === action, `${label}应调用 ${action}`);
+      }
+    }],
+    ["卡片操作失败显示原因并保留卡片", async () => {
+      failure = { command: "record_card_action", message: "删除录像失败：文件不存在" }; await mount(RecordCard, card); await click("删除");
+      assert(document.body.textContent.includes("文件不存在") && !named("删除").disabled, "失败后卡片保留且可重试");
+    }],
+    ["录制提前结束时卡片显示提示", async () => {
+      await mount(RecordCard, { ...card, warning: "录制提前结束：屏幕共享已停止" });
+      assert(document.body.textContent.includes("屏幕共享已停止"), "应显示提前结束的原因");
+    }],
+  ];
+  const failures = [];
+  for (const [scenario, test] of scenarios) {
+    try { status = { ...base }; failure = null; pendingStart = null; await mount(); await test(); }
+    catch (error) { failures.push({ scenario, message: String(error) }); }
+    localStorage.removeItem("qingbox.record.options");
+  }
+  root?.unmount(); root = null;
+  const result = document.createElement("pre"); result.id = "result";
+  result.textContent = JSON.stringify({ total: scenarios.length, passed: scenarios.length - failures.length, failures }); document.body.append(result);
+</script></body></html>

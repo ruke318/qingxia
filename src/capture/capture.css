@@ -45,3 +45,22 @@ body { font-family: "SF Pro Text", "PingFang SC", -apple-system, sans-serif; -we
 .pin-image { display: block; width: 100vw; height: 100vh; box-sizing: border-box; border-radius: 6px; outline: 1px solid rgba(0, 0, 0, 0.18); outline-offset: -1px; cursor: grab; object-fit: fill; }
 /* 未框选时鼠标下窗口的高亮：与选区相同的遮罩挖空，不接收鼠标事件 */
 .capture-hover { position: absolute; box-sizing: border-box; border: 2px solid #65c7ff; border-radius: 6px; box-shadow: 0 0 0 10000px rgba(0, 0, 0, 0.28); background: rgba(101, 199, 255, 0.08); pointer-events: none; }
+/* 长截图：选区只保留边框，鼠标穿透到下方应用 */
+.capture-selection.long-shot { border: 2px solid #3d8bfd; background: transparent; cursor: default; }
+/* 长截图控制面板 */
+/* 长截图面板：窗口透明，上方预览与选区等高，下方工具栏靠向选区一侧 */
+.long-panel { box-sizing: border-box; height: 100vh; display: flex; flex-direction: column; gap: 8px; color: #262b31; font-size: 13px; }
+.long-panel-preview { position: relative; flex: 1; min-height: 0; overflow: hidden; border-radius: 6px; background: #fff; box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .18); }
+.long-panel-preview img { display: block; width: 100%; height: 100%; object-fit: contain; object-position: top center; }
+.long-panel-preview p { margin: 0; padding: 32px 12px; color: #8d969f; font-size: 12px; line-height: 1.7; text-align: center; }
+.long-panel-status { position: absolute; left: 50%; bottom: 10px; max-width: calc(100% - 20px); box-sizing: border-box; padding: 4px 10px; border-radius: 999px; color: #fff; background: rgba(38, 43, 49, .82); font-size: 11px; line-height: 1.5; white-space: nowrap; overflow: hidden; text-overflow: ellipsis; transform: translateX(-50%); }
+.long-panel-status.warning { background: rgba(163, 101, 29, .92); }
+.long-panel-status.error { white-space: normal; background: rgba(184, 58, 58, .95); }
+.long-panel-toolbar { display: flex; flex: none; align-self: flex-start; align-items: center; gap: 2px; height: 40px; padding: 0 5px; box-sizing: border-box; border-radius: 9px; background: rgba(250, 251, 250, .98); box-shadow: inset 0 0 0 .5px rgba(0, 0, 0, .14); }
+.long-panel.left .long-panel-toolbar, .long-panel.inside .long-panel-toolbar { align-self: flex-end; }
+.long-panel-toolbar button { display: flex; align-items: center; justify-content: center; width: 34px; height: 30px; padding: 0; border: 0; border-radius: 6px; color: #262b31; background: transparent; cursor: pointer; }
+.long-panel-toolbar button:hover:not(:disabled) { background: rgba(42, 49, 59, .08); }
+.long-panel-toolbar button:disabled { cursor: default; opacity: .45; }
+.long-panel-toolbar button.done { color: #fff; background: #3f7f63; }
+.long-panel-toolbar button.done:hover:not(:disabled) { background: #356c54; }
+.long-panel-toolbar svg { width: 17px; height: 17px; fill: none; stroke: currentColor; stroke-width: 1.7; stroke-linecap: round; stroke-linejoin: round; }
